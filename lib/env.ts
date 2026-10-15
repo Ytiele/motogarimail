@@ -1,16 +1,17 @@
 import "server-only";
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required environment variable ${name}`);
+function required(name: string, ...alternatives: string[]): string {
+  const v = [name, ...alternatives].map((n) => process.env[n]).find(Boolean);
+  if (!v) throw new Error(`Missing required environment variable ${[name, ...alternatives].join(" or ")}`);
   return v;
 }
 
 export const env = {
   appUrl: () => (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
   supabaseUrl: () => required("NEXT_PUBLIC_SUPABASE_URL"),
-  supabaseAnonKey: () => required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  serviceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),
+  // Newer Supabase projects call these the publishable and secret keys; the legacy anon / service_role names also work.
+  supabaseAnonKey: () => process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+  serviceRoleKey: () => required("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
   googleClientId: () => required("GOOGLE_CLIENT_ID"),
   googleClientSecret: () => required("GOOGLE_CLIENT_SECRET"),
   googleRedirectUri: () => required("GOOGLE_REDIRECT_URI"),
