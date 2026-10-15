@@ -92,7 +92,7 @@ npm run build
 
 ### 5. Deploy (Vercel)
 
-Import the repo, add every variable from `.env.example`, deploy. `vercel.json` schedules `/api/cron/sync` every 5 minutes (Vercel Pro; on Hobby, crons run once a day — use Pub/Sub push, or call the endpoint from an external scheduler or Supabase `pg_cron` with `Authorization: Bearer $CRON_SECRET`).
+Import the repo, add every variable from `.env.example`, deploy. `vercel.json` schedules `/api/cron/sync` once a day (03:00 UTC), the most Vercel Hobby allows. For timely mail, also call the endpoint every 5 minutes from an external scheduler (e.g. cron-job.org) or Supabase `pg_cron` with the header `Authorization: Bearer $CRON_SECRET`, and/or enable Pub/Sub push. On Vercel Pro you can set the schedule to `*/5 * * * *` instead.
 
 ## First-run onboarding
 
