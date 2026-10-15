@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #f6f5f2;
+  --color-ink: #2b2c30;
+  --color-ink-2: #3a3b40;
+  --color-side: #ffffff;
+  --color-line: #e6e3dc;
+  --color-muted: #6b6f78;
+  --color-brand-50: #fdeced;
+  --color-brand-100: #fad3d5;
+  --color-brand-500: #d7262e;
+  --color-brand-600: #bd1f26;
+  --color-brand-700: #a81c22;
+}
+
+/*
+ * Dark theme. Tailwind v4 utilities read colours from CSS variables, so redefining the palette here
+ * re-themes every component. A small script in the root layout sets data-theme before first paint
+ * from the user's choice (Light / Dark / System).
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #121317;
+  --color-ink: #ecebe8;
+  --color-ink-2: #d6d5d2;
+  --color-side: #1b1c20;
+  --color-line: #30333a;
+  --color-muted: #9fa2aa;
+  --color-white: #1b1d22;
+  --color-black: #000;
+  --color-brand-50: #2d1517;
+  --color-brand-100: #45191d;
+  --color-brand-500: #e5484d;
+  --color-brand-600: #f0595e;
+  --color-brand-700: #ff9a9e;
+
+  --color-stone-50: #20232a;
+  --color-stone-100: #272a31;
+  --color-stone-200: #33363e;
+  --color-stone-300: #454852;
+  --color-stone-400: #7d808a;
+  --color-stone-500: #9a9da5;
+  --color-stone-600: #b9bbc1;
+  --color-stone-700: #d0d2d6;
+  --color-slate-50: #1f242c;
+  --color-slate-100: #263040;
+  --color-slate-200: #34405a;
+  --color-slate-400: #8291aa;
+  --color-slate-700: #c5cfdf;
+  --color-slate-800: #d7dfeb;
+
+  --color-red-50: #2c1416;
+  --color-red-100: #3d181b;
+  --color-red-200: #5c2227;
+  --color-red-300: #7a2a30;
+  --color-red-700: #ff8f94;
+  --color-red-800: #ffa9ad;
+  --color-blue-50: #131d33;
+  --color-blue-100: #1a2948;
+  --color-blue-200: #29406d;
+  --color-blue-800: #a9c4ff;
+  --color-blue-900: #c3d6ff;
+  --color-violet-50: #1e1733;
+  --color-violet-200: #3c2c66;
+  --color-violet-800: #cdb6ff;
+  --color-amber-50: #2a2210;
+  --color-amber-200: #5a4719;
+  --color-amber-300: #6e5720;
+  --color-amber-400: #f2c063;
+  --color-amber-800: #f2cd85;
+  --color-amber-900: #f6da9f;
+  --color-amber-950: #fae6be;
+  --color-cyan-50: #0f2429;
+  --color-cyan-200: #1d4a54;
+  --color-cyan-900: #9fe3f0;
+  --color-emerald-50: #0f251c;
+  --color-emerald-200: #1c4a37;
+  --color-emerald-700: #6fd8a6;
+  --color-emerald-800: #8ee3bb;
+  --color-orange-100: #3a2410;
+  --color-orange-800: #f7b878;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  &:focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+}
+
+@utility btn-primary {
+  @apply btn bg-ink text-canvas hover:bg-ink-2;
+}
+@utility btn-brand {
+  @apply btn bg-brand-500 text-white hover:bg-brand-600;
+}
+@utility btn-secondary {
+  @apply btn border border-line bg-white text-ink hover:bg-stone-50;
+}
+@utility btn-ghost {
+  @apply btn text-muted hover:bg-stone-100 hover:text-ink;
+}
+@utility btn-danger {
+  @apply btn border border-red-200 bg-white text-red-700 hover:bg-red-50;
+}
+@utility input {
+  @apply block w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink placeholder:text-stone-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none;
+}
+@utility label {
+  @apply mb-1 block text-xs font-medium tracking-wide text-muted uppercase;
+}
+@utility card {
+  @apply rounded-xl border border-line bg-white;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
