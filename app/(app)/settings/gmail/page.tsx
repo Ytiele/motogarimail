@@ -31,6 +31,10 @@ export default async function GmailSettings({ searchParams }: { searchParams: Pr
   const { supabase } = await requireAdmin();
   const conn = await getPublicConnection();
   const mock = env.mailProvider() === "mock";
+  // Names only, never values: tells the admin exactly which Vercel variable the server cannot see.
+  const missingGoogle = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"].filter((n) => !process.env[n]?.trim());
+  // A stale ?error=not_configured from an earlier attempt is not shown once the server is configured.
+  const error = sp.error === "not_configured" && !missingGoogle.length ? undefined : sp.error;
   const [{ data: logs }, { data: threads }] = await Promise.all([
     supabase.from("sync_logs").select("*").order("created_at", { ascending: false }).limit(15),
     mock ? supabase.from("conversations").select("gmail_thread_id, subject").order("last_message_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
@@ -39,7 +43,7 @@ export default async function GmailSettings({ searchParams }: { searchParams: Pr
   return (
     <>
       <PageHeader title="Gmail connection" subtitle="The company mailbox is connected once, server-side, with Google OAuth. Staff never see the Gmail password or tokens." />
-      {sp.error && <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">{ERRORS[sp.error] ?? "Connection failed."}</p>}
+      {error && <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">{ERRORS[error] ?? "Connection failed."}</p>}
       {sp.connected && <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">Gmail connected. The initial import has started in the background.</p>}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -69,6 +73,15 @@ export default async function GmailSettings({ searchParams }: { searchParams: Pr
                 Requests only two permissions: read email and send email. The app cannot delete mail or change labels.
                 Gmail’s read/unread state is ignored — the dashboard status is what counts.
               </p>
+              {missingGoogle.length > 0 ? (
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  The server cannot see: <strong>{missingGoogle.join(", ")}</strong>. Add {missingGoogle.length > 1 ? "them" : "it"} in Vercel → Settings → Environment Variables (Production), then redeploy.
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-muted">
+                  Redirect URI in use: <code className="break-all">{env.googleRedirectUri()}</code> — it must match the Google Cloud OAuth client exactly.
+                </p>
+              )}
               <form action="/api/gmail/connect" method="get" className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div>
                   <label className="label" htmlFor="window">Import history</label>

@@ -12,3 +12,6 @@ coverage
 # Local-only design mockup with sample data; not part of the app
 /demo/
 /scripts/demo-server.mjs
+
+# One-off combined setup script (generated from supabase/migrations)
+/SUPABASE-SETUP.sql
