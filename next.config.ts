@@ -10,7 +10,6 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["sanitize-html"],
   experimental: {
     serverActions: { bodySizeLimit: "2mb" },
   },
