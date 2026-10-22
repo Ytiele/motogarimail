@@ -38,6 +38,7 @@ export async function prepareChatUpload(name: string, size: number): Promise<Res
 const sendSchema = z.object({
   to: uuid.optional(),
   room: uuid.optional(),
+  replyTo: uuid.nullable().optional(),
   body: z.string().trim().max(4000, "Messages can be at most 4000 characters.").optional().default(""),
   attachment: z
     .object({ path: z.string().max(300), name: z.string().trim().min(1).max(200), type: z.string().max(150), size: z.number().int().positive().max(MAX_FILE) })
@@ -57,6 +58,10 @@ export type ChatMessage = {
   attachment_size: number | null;
   created_at: string;
   read_at: string | null;
+  reply_to_id: string | null;
+  forwarded: boolean;
+  edited_at: string | null;
+  deleted_at: string | null;
 };
 
 export async function sendChatMessage(input: unknown): Promise<Result<{ message: ChatMessage }>> {
@@ -64,7 +69,7 @@ export async function sendChatMessage(input: unknown): Promise<Result<{ message:
     const user = await me();
     const parsed = sendSchema.safeParse(input);
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-    const { to, room, body, attachment } = parsed.data;
+    const { to, room, body, attachment, replyTo } = parsed.data;
     if (!to === !room) return { ok: false, error: "Invalid request." };
     if (to === user.id) return { ok: false, error: "Pick someone else to chat with." };
     if (!body && !attachment) return { ok: false, error: "Write a message first." };
@@ -78,12 +83,19 @@ export async function sendChatMessage(input: unknown): Promise<Result<{ message:
     } else if (!(await isMember(room!, user.id))) {
       return { ok: false, error: "You are not in this group." };
     }
+    if (replyTo) {
+      // A reply must point at a message in this same conversation.
+      const { data: orig } = await db.from("chat_messages").select("sender_id, recipient_id, room_id").eq("id", replyTo).maybeSingle();
+      const sameThread = orig && (room ? orig.room_id === room : !orig.room_id && [orig.sender_id, orig.recipient_id].sort().join() === [user.id, to].sort().join());
+      if (!sameThread) return { ok: false, error: "The message you are replying to is not in this chat." };
+    }
     const { data, error } = await db
       .from("chat_messages")
       .insert({
         sender_id: user.id,
         recipient_id: to ?? null,
         room_id: room ?? null,
+        reply_to_id: replyTo ?? null,
         body: body || null,
         attachment_path: attachment?.path ?? null,
         attachment_name: attachment?.name ?? null,
@@ -199,4 +211,157 @@ export async function markRoomRead(roomId: string): Promise<void> {
   const user = await currentUser();
   if (!user) return;
   await adminDb().from("chat_room_members").update({ last_read_at: new Date().toISOString() }).eq("room_id", roomId).eq("user_id", user.id);
+}
+
+// --- Message actions -----------------------------------------------------------
+
+type MessageRow = ChatMessage;
+
+async function loadMessage(id: string): Promise<MessageRow | null> {
+  const { data } = await adminDb().from("chat_messages").select("*").eq("id", id).maybeSingle();
+  return (data as MessageRow) ?? null;
+}
+
+async function canRead(m: MessageRow, userId: string) {
+  return m.sender_id === userId || m.recipient_id === userId || (!!m.room_id && (await isMember(m.room_id, userId)));
+}
+
+/** Only the sender can edit, and only while the message still exists. */
+export async function editChatMessage(id: string, body: string): Promise<Result<{ message: ChatMessage }>> {
+  try {
+    const user = await me();
+    const text = z.string().trim().max(4000, "Messages can be at most 4000 characters.").safeParse(body);
+    if (!uuid.safeParse(id).success || !text.success) return { ok: false, error: text.success ? "Invalid request." : text.error.issues[0].message };
+    const m = await loadMessage(id);
+    if (!m || m.sender_id !== user.id) return { ok: false, error: "You can only edit your own messages." };
+    if (m.deleted_at) return { ok: false, error: "This message was deleted." };
+    if (!text.data && !m.attachment_path) return { ok: false, error: "A message cannot be empty. Delete it instead." };
+    const { data, error } = await adminDb()
+      .from("chat_messages")
+      .update({ body: text.data || null, edited_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("*")
+      .single();
+    return error || !data ? { ok: false, error: "Could not edit the message." } : { ok: true, message: data as ChatMessage };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Deletes your own message for everyone: text and file are removed, a "deleted" marker stays. */
+export async function deleteChatMessage(id: string): Promise<Result<{ message: ChatMessage }>> {
+  try {
+    const user = await me();
+    if (!uuid.safeParse(id).success) return { ok: false, error: "Invalid request." };
+    const m = await loadMessage(id);
+    if (!m || m.sender_id !== user.id) return { ok: false, error: "You can only delete your own messages." };
+    const db = adminDb();
+    const { data, error } = await db
+      .from("chat_messages")
+      .update({ body: null, attachment_path: null, attachment_name: null, attachment_type: null, attachment_size: null, deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) return { ok: false, error: "Could not delete the message." };
+    // Forwarded copies have their own file, so this one can go.
+    if (m.attachment_path) await db.storage.from(CHAT_BUCKET).remove([m.attachment_path]).catch(() => {});
+    return { ok: true, message: data as ChatMessage };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+const forwardSchema = z.object({
+  id: uuid,
+  people: z.array(uuid).max(20).default([]),
+  rooms: z.array(uuid).max(20).default([]),
+});
+
+/** Re-shares a message (with its file) into other chats. Each copy gets its own file and is marked Forwarded. */
+export async function forwardChatMessage(input: unknown): Promise<Result<{ messages: ChatMessage[] }>> {
+  try {
+    const user = await me();
+    const parsed = forwardSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: "Invalid request." };
+    const { id, people, rooms } = parsed.data;
+    if (!people.length && !rooms.length) return { ok: false, error: "Pick at least one person or group." };
+    if (!(await allow(`chat-forward:${user.id}`, 30, 60))) return { ok: false, error: "You are forwarding too quickly. Wait a moment." };
+    const m = await loadMessage(id);
+    if (!m || !(await canRead(m, user.id))) return { ok: false, error: "Message not found." };
+    if (m.deleted_at) return { ok: false, error: "This message was deleted." };
+
+    const db = adminDb();
+    const peopleOk = new Set(await activeIds(people.filter((p) => p !== user.id)));
+    const roomsOk: string[] = [];
+    for (const r of rooms) if (await isMember(r, user.id)) roomsOk.push(r);
+    const targets = [...[...peopleOk].map((to) => ({ recipient_id: to, room_id: null })), ...roomsOk.map((room) => ({ recipient_id: null, room_id: room }))];
+    if (!targets.length) return { ok: false, error: "None of those chats are available." };
+
+    const sent: ChatMessage[] = [];
+    for (const t of targets) {
+      let attachment_path: string | null = null;
+      if (m.attachment_path) {
+        attachment_path = `${user.id}/${randomUUID()}.${safeName(m.attachment_name ?? "file")}`;
+        const { error: copyErr } = await db.storage.from(CHAT_BUCKET).copy(m.attachment_path, attachment_path);
+        if (copyErr) return { ok: false, error: "Could not copy the file. Please try again." };
+      }
+      const { data, error } = await db
+        .from("chat_messages")
+        .insert({
+          sender_id: user.id,
+          ...t,
+          body: m.body,
+          attachment_path,
+          attachment_name: m.attachment_path ? m.attachment_name : null,
+          attachment_type: m.attachment_path ? m.attachment_type : null,
+          attachment_size: m.attachment_path ? m.attachment_size : null,
+          forwarded: true,
+        })
+        .select("*")
+        .single();
+      if (error || !data) return { ok: false, error: "Could not forward the message." };
+      sent.push(data as ChatMessage);
+    }
+    return { ok: true, messages: sent };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** "Delete conversation" for a 1:1 chat: hides everything so far for you only; the other person keeps theirs. */
+export async function clearChatConversation(peerId: string): Promise<Result<{ clearedAt: string }>> {
+  try {
+    const user = await me();
+    if (!uuid.safeParse(peerId).success || peerId === user.id) return { ok: false, error: "Invalid request." };
+    const clearedAt = new Date().toISOString();
+    const db = adminDb();
+    const { error } = await db.from("chat_clears").upsert({ user_id: user.id, peer_id: peerId, cleared_at: clearedAt });
+    if (error) return { ok: false, error: "Could not delete the conversation." };
+    await db.from("chat_messages").update({ read_at: clearedAt }).eq("recipient_id", user.id).eq("sender_id", peerId).is("read_at", null);
+    return { ok: true, clearedAt };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Deletes a group and all its messages and files for everyone. Allowed for whoever created it, or an admin member. */
+export async function deleteChatGroup(roomId: string): Promise<Result> {
+  try {
+    const user = await me();
+    if (!uuid.safeParse(roomId).success) return { ok: false, error: "Invalid request." };
+    const db = adminDb();
+    const { data: room } = await db.from("chat_rooms").select("created_by").eq("id", roomId).maybeSingle();
+    if (!room) return { ok: false, error: "Group not found." };
+    if (!(await isMember(roomId, user.id)) || (room.created_by !== user.id && user.role !== "admin")) {
+      return { ok: false, error: "Only the person who created the group, or an admin, can delete it. You can leave it instead." };
+    }
+    const { data: files } = await db.from("chat_messages").select("attachment_path").eq("room_id", roomId).not("attachment_path", "is", null);
+    const { error } = await db.from("chat_rooms").delete().eq("id", roomId);
+    if (error) return { ok: false, error: "Could not delete the group." };
+    const paths = (files ?? []).map((f) => f.attachment_path as string);
+    for (let i = 0; i < paths.length; i += 100) await db.storage.from(CHAT_BUCKET).remove(paths.slice(i, i + 100)).catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }

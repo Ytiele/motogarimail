@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addChatMembers,
+  clearChatConversation,
   createChatGroup,
+  deleteChatGroup,
+  deleteChatMessage,
+  editChatMessage,
+  forwardChatMessage,
   leaveChatGroup,
   markChatRead,
   markRoomRead,
@@ -20,7 +25,7 @@ import { browserDb } from "@/lib/supabase/browser";
 type Peer = { id: string; name: string; role: "admin" | "staff"; department: string | null };
 type Member = { room_id: string; user_id: string; last_read_at: string };
 type Sel = { kind: "dm" | "room"; id: string };
-type View = "list" | "thread" | "newGroup" | "groupInfo";
+type View = "list" | "thread" | "newGroup" | "groupInfo" | "forward";
 type Pending = { name: string; size: number; type: string; status: "uploading" | "ready" | "error"; path?: string; preview?: string; error?: string };
 
 const IMAGE = /^image\/(png|jpe?g|gif|webp)$/i;
@@ -40,6 +45,13 @@ const CLIP = "M15 9l-5.6 5.6a3.4 3.4 0 01-4.8-4.8l6-6a2.2 2.2 0 013.2 3.2L7.9 13
 const SEND = "M3 10l14-6-5 14-2.5-5.5L3 10z";
 const GROUP = "M7 9a3 3 0 100-6 3 3 0 000 6zM1.5 16.5a5.5 5.5 0 0111 0M13.5 9a2.5 2.5 0 100-5M14.5 11.5a4.5 4.5 0 014 5";
 const INFO = "M10 17.5a7.5 7.5 0 100-15 7.5 7.5 0 000 15zM10 9v5M10 6.5h.01";
+const TRASH = "M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11";
+const REPLY = "M8 5L3 10l5 5M3 10h9a5 5 0 015 5v1";
+const FORWARD = "M12 5l5 5-5 5M17 10H8a5 5 0 00-5 5v1";
+const EDIT = "M13.5 3.5l3 3L8 15H5v-3z";
+const COPY = "M7 7h9v9H7zM4 13V4h9";
+
+const snippet = (m: ChatMessage) => (m.deleted_at ? "This message was deleted" : (m.body ?? (m.attachment_name ? `📎 ${m.attachment_name}` : "")));
 
 function GroupAvatar({ size = 40 }: { size?: number }) {
   return (
@@ -50,7 +62,7 @@ function GroupAvatar({ size = 40 }: { size?: number }) {
 }
 
 /** Top-bar chat button + right-hand team chat panel: direct messages and group chats between staff. */
-export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
+export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "admin" | "staff" } }) {
   const [open, setOpen] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -68,6 +80,14 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [groupNameInput, setGroupNameInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Message actions
+  const [actionFor, setActionFor] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  const [pickedRooms, setPickedRooms] = useState<Set<string>>(new Set());
+  const [clears, setClears] = useState<Record<string, string>>({});
+  const [flash, setFlash] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const openRef = useRef(open);
@@ -103,6 +123,9 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
     db.from("chat_messages").select("*").order("created_at", { ascending: false }).limit(500)
       .then(({ data }) => merge((data as ChatMessage[]) ?? []));
     loadRooms();
+    db.from("chat_clears").select("peer_id, cleared_at").then(({ data }) =>
+      setClears(Object.fromEntries(((data as { peer_id: string; cleared_at: string }[]) ?? []).map((c) => [c.peer_id, c.cleared_at]))),
+    );
     const channel = db
       .channel("motogari-chat")
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, (payload) => {
@@ -140,12 +163,17 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
 
   const inThread = useCallback(
     (m: ChatMessage, s: Sel) =>
-      s.kind === "room" ? m.room_id === s.id : !m.room_id && ((m.sender_id === s.id && m.recipient_id === me.id) || (m.sender_id === me.id && m.recipient_id === s.id)),
-    [me.id],
+      s.kind === "room"
+        ? m.room_id === s.id
+        : !m.room_id &&
+          ((m.sender_id === s.id && m.recipient_id === me.id) || (m.sender_id === me.id && m.recipient_id === s.id)) &&
+          // Messages before "Delete conversation" are hidden for me only.
+          (!clears[s.id] || m.created_at > clears[s.id]),
+    [me.id, clears],
   );
   const unreadOf = (s: Sel) =>
     s.kind === "dm"
-      ? messages.filter((m) => !m.room_id && m.sender_id === s.id && m.recipient_id === me.id && !m.read_at).length
+      ? messages.filter((m) => inThread(m, s) && m.sender_id === s.id && !m.read_at).length
       : messages.filter((m) => m.room_id === s.id && m.sender_id !== me.id && m.created_at > myRead(s.id)).length;
   const myRooms = rooms.filter((r) => members.some((m) => m.room_id === r.id && m.user_id === me.id));
   const unreadTotal =
@@ -163,7 +191,7 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
       .map((p) => ({ sel: { kind: "dm" as const, id: p.id }, name: p.name, sub: p.department ?? (p.role === "admin" ? "Admin" : "Staff"), last: lastOf({ kind: "dm", id: p.id }) }));
     return [...groupEntries, ...peopleEntries].sort((a, b) => (b.last?.created_at ?? "").localeCompare(a.last?.created_at ?? "") || a.name.localeCompare(b.name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peers, rooms, members, messages, query]);
+  }, [peers, rooms, members, messages, query, clears]);
 
   const thread = sel ? messages.filter((m) => inThread(m, sel)) : [];
   const title = sel ? (sel.kind === "room" ? (room(sel.id)?.name ?? "Group") : peerName(sel.id)) : "";
@@ -190,6 +218,22 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [thread.length, sel, open, view]);
+
+  useEffect(() => {
+    if (sel?.kind === "room" && rooms.length >= 0 && !rooms.some((r) => r.id === sel.id) && (view === "thread" || view === "groupInfo")) {
+      const t = setTimeout(() => {
+        setSel(null);
+        setView("list");
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [rooms, sel, view]);
+
+  useEffect(() => {
+    setActionFor(null);
+    setReplyTo(null);
+    setEditing(null);
+  }, [sel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -225,13 +269,78 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
     const r = await sendChatMessage({
       ...(sel.kind === "room" ? { room: sel.id } : { to: sel.id }),
       body,
+      replyTo: replyTo?.id ?? null,
       attachment: pending?.status === "ready" && pending.path ? { path: pending.path, name: pending.name, type: pending.type, size: pending.size } : null,
     });
     setSending(false);
     if (!r.ok) return setError(r.error);
     merge([r.message]);
     resetComposer();
+    setReplyTo(null);
   }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    const r = await editChatMessage(editing.id, editing.text);
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    merge([r.message]);
+    setEditing(null);
+  }
+  async function removeMessage(m: ChatMessage) {
+    if (!window.confirm("Delete this message for everyone?")) return;
+    const r = await deleteChatMessage(m.id);
+    if (!r.ok) return setError(r.error);
+    merge([r.message]);
+    setActionFor(null);
+  }
+  async function clearConversation() {
+    if (!sel || sel.kind !== "dm") return;
+    if (!window.confirm(`Delete this conversation for you? ${firstName(title)} keeps their copy.`)) return;
+    const r = await clearChatConversation(sel.id);
+    if (!r.ok) return setError(r.error);
+    setClears((c) => ({ ...c, [sel.id]: r.clearedAt }));
+    setMessages((prev) => prev.map((m) => (!m.room_id && m.sender_id === sel.id && m.recipient_id === me.id && !m.read_at ? { ...m, read_at: r.clearedAt } : m)));
+    setView("list");
+  }
+  async function removeGroup() {
+    if (!sel || sel.kind !== "room") return;
+    if (!window.confirm(`Delete “${title}” for everyone? All its messages and files will be removed. This cannot be undone.`)) return;
+    setBusy(true);
+    const r = await deleteChatGroup(sel.id);
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    setSel(null);
+    setView("list");
+    await loadRooms();
+  }
+  const startForward = (m: ChatMessage) => {
+    setForwardMsg(m);
+    setPicked(new Set());
+    setPickedRooms(new Set());
+    setQuery("");
+    setError(null);
+    setActionFor(null);
+    setView("forward");
+  };
+  async function doForward() {
+    if (!forwardMsg) return;
+    setBusy(true);
+    const r = await forwardChatMessage({ id: forwardMsg.id, people: [...picked], rooms: [...pickedRooms] });
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    merge(r.messages);
+    setForwardMsg(null);
+    setView("thread");
+  }
+  const jumpTo = (id: string) => {
+    const el = document.getElementById(`chat-msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(id);
+    setTimeout(() => setFlash(null), 1200);
+  };
 
   const openThread = (s: Sel) => {
     setSel(s);
@@ -410,7 +519,7 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
                           </span>
                           <span className="flex items-center justify-between gap-2">
                             <span className={cx("truncate text-xs", unread ? "font-semibold text-ink" : "text-muted")}>
-                              {last ? `${who}${last.body ?? (last.attachment_name ? `📎 ${last.attachment_name}` : "")}` : e.sub}
+                              {last ? `${who}${snippet(last)}` : e.sub}
                             </span>
                             {unread > 0 && <span className="tabular shrink-0 rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-[#fff]">{unread}</span>}
                           </span>
@@ -473,6 +582,53 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
                   {picked.size ? `Add ${picked.size} ${picked.size === 1 ? "person" : "people"}` : "Add people"}
                 </button>
                 <button type="button" className="btn-danger w-full" disabled={busy} onClick={leave}>Leave group</button>
+                {(room(sel.id)?.created_by === me.id || me.role === "admin") && (
+                  <button type="button" className="btn-ghost w-full text-red-700" disabled={busy} onClick={removeGroup}>
+                    Delete group for everyone
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {view === "forward" && forwardMsg && (
+            <>
+              {header("Forward to…", () => setView("thread"))}
+              <div className="mx-4 mt-3 rounded-xl border-l-2 border-brand-500 bg-canvas px-3 py-2 text-xs text-muted">
+                <span className="line-clamp-3">{snippet(forwardMsg)}</span>
+              </div>
+              {searchBox("Search people and groups")}
+              <ul className="max-h-[40%] shrink-0 overflow-y-auto">
+                {myRooms
+                  .filter((r) => !query.trim() || r.name.toLowerCase().includes(query.trim().toLowerCase()))
+                  .map((r) => (
+                    <li key={r.id}>
+                      <label className="flex cursor-pointer items-center gap-3 px-4 py-2 hover:bg-hover">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-brand-500"
+                          checked={pickedRooms.has(r.id)}
+                          onChange={() =>
+                            setPickedRooms((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(r.id)) n.delete(r.id);
+                              else n.add(r.id);
+                              return n;
+                            })
+                          }
+                        />
+                        <GroupAvatar size={32} />
+                        <span className="truncate text-sm text-ink">{r.name}</span>
+                      </label>
+                    </li>
+                  ))}
+              </ul>
+              {pickList(peers)}
+              <div className="border-t border-line p-3">
+                {error && <p role="alert" className="mb-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-800">{error}</p>}
+                <button type="button" className="btn-brand w-full" disabled={busy || (!picked.size && !pickedRooms.size)} onClick={doForward}>
+                  {busy ? "Forwarding…" : `Forward${picked.size + pickedRooms.size ? ` to ${picked.size + pickedRooms.size}` : ""}`}
+                </button>
               </div>
             </>
           )}
@@ -492,9 +648,13 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
                     </div>
                   )}
                 </div>
-                {sel.kind === "room" && (
+                {sel.kind === "room" ? (
                   <button type="button" className="icon-btn h-9 w-9" onClick={() => startPicking("groupInfo")} aria-label="Group info" title="Group info">
                     <Svg d={INFO} size={18} />
+                  </button>
+                ) : (
+                  <button type="button" className="icon-btn h-9 w-9" onClick={clearConversation} aria-label="Delete conversation" title="Delete conversation (for you)">
+                    <Svg d={TRASH} size={18} />
                   </button>
                 )}
                 <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
@@ -511,10 +671,63 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
                   const isImage = m.attachment_path && IMAGE.test(m.attachment_type ?? "");
                   const lastMine = mine && !thread.slice(i + 1).some((x) => x.sender_id === me.id);
                   const showName = sel.kind === "room" && !mine && thread[i - 1]?.sender_id !== m.sender_id;
+                  const quoted = m.reply_to_id ? messages.find((x) => x.id === m.reply_to_id) : null;
+                  if (editing?.id === m.id) {
+                    return (
+                      <div key={m.id} id={`chat-msg-${m.id}`} className="flex flex-col items-end">
+                        <div className="w-[85%] rounded-2xl bg-brand-100 p-2">
+                          <textarea
+                            className="input min-h-16 text-sm"
+                            value={editing.text}
+                            autoFocus
+                            onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                saveEdit();
+                              }
+                              if (e.key === "Escape") setEditing(null);
+                            }}
+                            aria-label="Edit message"
+                          />
+                          <div className="mt-1.5 flex justify-end gap-1">
+                            <button type="button" className="btn-ghost h-8 text-xs" onClick={() => setEditing(null)}>Cancel</button>
+                            <button type="button" className="btn-brand h-8 text-xs" disabled={busy} onClick={saveEdit}>Save</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={m.id} className={cx("flex flex-col", mine ? "items-end" : "items-start")}>
+                    <div key={m.id} id={`chat-msg-${m.id}`} className={cx("flex flex-col", mine ? "items-end" : "items-start")}>
                       {showName && <span className="mt-1 px-1 text-[11px] font-medium text-muted">{peerName(m.sender_id)}</span>}
-                      <div className={cx("max-w-[85%] rounded-2xl px-3 py-2 text-sm break-words whitespace-pre-wrap", mine ? "rounded-br-md bg-brand-100 text-ink" : "rounded-bl-md bg-stone-100 text-ink")}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setActionFor((a) => (a === m.id ? null : m.id))}
+                        onKeyDown={(e) => e.key === "Enter" && setActionFor((a) => (a === m.id ? null : m.id))}
+                        title="Click for options"
+                        className={cx(
+                          "max-w-[85%] cursor-pointer rounded-2xl px-3 py-2 text-sm break-words whitespace-pre-wrap transition-shadow",
+                          mine ? "rounded-br-md bg-brand-100 text-ink" : "rounded-bl-md bg-stone-100 text-ink",
+                          (actionFor === m.id || flash === m.id) && "ring-2 ring-brand-500",
+                        )}
+                      >
+                        {m.forwarded && !m.deleted_at && <span className="mb-0.5 block text-[11px] text-muted italic">↪ Forwarded</span>}
+                        {m.reply_to_id && (
+                          <span
+                            role="link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              jumpTo(m.reply_to_id!);
+                            }}
+                            className="mb-1 block rounded-lg border-l-2 border-brand-500 bg-white/70 px-2 py-1 text-xs"
+                          >
+                            <span className="block font-medium text-ink-2">{quoted ? peerName(quoted.sender_id) : "Earlier message"}</span>
+                            <span className="line-clamp-2 text-muted">{quoted ? snippet(quoted) : "Not loaded"}</span>
+                          </span>
+                        )}
+                        {m.deleted_at && <span className="text-muted italic">🚫 This message was deleted</span>}
                         {isImage && (
                           <a href={fileUrl(m.id)} target="_blank" rel="noopener" className="mb-1 block">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -528,10 +741,26 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
                             {m.attachment_size ? <span className="shrink-0 text-xs text-muted">{formatBytes(m.attachment_size)}</span> : null}
                           </a>
                         )}
-                        {m.body}
+                        {!m.deleted_at && m.body}
                       </div>
+                      {actionFor === m.id && !m.deleted_at && (
+                        <div className="mt-1 flex gap-0.5 rounded-full bg-white p-0.5 shadow-[0_1px_4px_rgba(60,64,67,.3)] ring-1 ring-line">
+                          {[
+                            { label: "Reply", d: REPLY, on: () => { setReplyTo(m); setActionFor(null); } },
+                            { label: "Forward", d: FORWARD, on: () => startForward(m) },
+                            ...(m.body ? [{ label: "Copy text", d: COPY, on: () => { navigator.clipboard?.writeText(m.body ?? "").catch(() => {}); setActionFor(null); } }] : []),
+                            ...(mine ? [{ label: "Edit", d: EDIT, on: () => { setEditing({ id: m.id, text: m.body ?? "" }); setActionFor(null); } }] : []),
+                            ...(mine ? [{ label: "Delete for everyone", d: TRASH, on: () => removeMessage(m) }] : []),
+                          ].map((a) => (
+                            <button key={a.label} type="button" onClick={a.on} className="icon-btn h-8 w-8" aria-label={a.label} title={a.label}>
+                              <Svg d={a.d} size={16} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <span className="mt-0.5 px-1 text-[10px] text-muted">
                         {timeOf(m.created_at)}
+                        {m.edited_at && !m.deleted_at ? " · edited" : ""}
                         {sel.kind === "dm" && lastMine && m.read_at ? " · Seen" : ""}
                       </span>
                     </div>
@@ -540,6 +769,15 @@ export function ChatLauncher({ me }: { me: { id: string; name: string } }) {
               </div>
 
               <div className="border-t border-line p-3">
+                {replyTo && (
+                  <div className="mb-2 flex items-start gap-2 rounded-xl border-l-2 border-brand-500 bg-canvas px-2 py-1.5 text-xs">
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-ink-2">Replying to {replyTo.sender_id === me.id ? "yourself" : peerName(replyTo.sender_id)}</span>
+                      <span className="line-clamp-2 text-muted">{snippet(replyTo)}</span>
+                    </span>
+                    <button type="button" className="rounded-full px-1.5 text-muted hover:bg-hover" onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button>
+                  </div>
+                )}
                 {pending && (
                   <div className={cx("mb-2 flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm", pending.status === "error" ? "bg-red-50" : "bg-canvas")}>
                     {pending.preview ? <img src={pending.preview} alt="" className="h-10 w-10 rounded object-cover" /> : <Svg d={CLIP} size={16} />}
