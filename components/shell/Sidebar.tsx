@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { logout } from "@/app/(auth)/actions";
 import { Logo } from "@/components/auth/AuthCard";
 import { ChatLauncher } from "@/components/chat/ChatLauncher";
+import { AccountMenu } from "@/components/shell/AccountMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
+import { isPhoneLoginEmail } from "@/lib/phone";
 import { SIDEBAR_COOKIE } from "@/lib/theme";
 import type { InboxCounts } from "@/lib/types";
 
@@ -238,9 +240,7 @@ export function Sidebar({
             <Icon name="bell" />
             {unread > 0 && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-brand-500" />}
           </Link>
-          <Link href="/account" className="ml-1 rounded-full p-1 hover:bg-hover" title={`${user.name} · ${isAdmin ? "Admin / CEO" : "Staff"}`}>
-            <Avatar name={user.name} size={32} />
-          </Link>
+          <AccountMenu name={user.name} contact={isPhoneLoginEmail(user.email) ? "Signs in with phone number" : user.email} roleLabel={isAdmin ? "Admin / CEO" : "Staff"} />
         </div>
       </header>
 
