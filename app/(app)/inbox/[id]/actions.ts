@@ -9,10 +9,12 @@ import { isValidEmail, parseAddressList } from "@/lib/mail/address";
 import { getActiveConnection, providerFor } from "@/lib/mail/connection";
 import { addJunkRule, findSweepable, matchingRules } from "@/lib/mail/junk";
 import { canBlockDomain, describeRule, senderDomain, type JunkRule } from "@/lib/mail/junk-rules";
-import { buildReferences, replySubject, textToHtml, escapeHtml } from "@/lib/mail/mime";
+import { htmlToText, sanitizeOutgoingHtml } from "@/lib/mail/compose";
+import { buildReferences, replySubject, escapeHtml } from "@/lib/mail/mime";
 import { ingestMessage } from "@/lib/mail/sync";
-import type { Address, ParsedMessage } from "@/lib/mail/types";
+import type { Address, OutgoingAttachment, ParsedMessage } from "@/lib/mail/types";
 import { notify } from "@/lib/notifications";
+import { createUploadUrls, downloadStaged, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, ownsStagingPath, removeStaged } from "@/lib/outgoing";
 import { allow } from "@/lib/rate-limit";
 import { adminDb } from "@/lib/supabase/admin";
 import type { ActionResult, AppUser, Conversation, EmailRow } from "@/lib/types";
@@ -368,13 +370,41 @@ export async function addNote(_: FormResult, form: FormData): Promise<FormResult
   }
 }
 
+const attachmentSchema = z.object({
+  path: z.string().max(300),
+  name: z.string().trim().min(1).max(200),
+  type: z.string().max(150),
+  inline: z.boolean(),
+});
+
 const replySchema = z.object({
   id: uuid,
   to: z.string().trim().min(3, "Add at least one recipient.").max(2000),
   cc: z.string().trim().max(2000).optional().default(""),
-  body: z.string().trim().min(1, "Write a reply first.").max(100_000),
+  html: z.string().max(500_000),
+  attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS, `Attach at most ${MAX_ATTACHMENTS} files.`),
   after: z.enum(["", "waiting", "resolved"]).optional().default(""),
 });
+
+/** Issues one-time upload URLs for files a staff member attaches to a reply (they upload straight to storage). */
+export async function prepareAttachmentUploads(
+  id: string,
+  files: { name: string; size: number }[],
+): Promise<{ ok: true; uploads: { path: string; token: string }[] } | { ok: false; error: string }> {
+  try {
+    if (!uuid.safeParse(id).success || !Array.isArray(files) || !files.length || files.length > MAX_ATTACHMENTS) return { ok: false, error: "Invalid request." };
+    const me = await actor();
+    const { data: conv } = await adminDb().from("conversations").select("assigned_to").eq("id", id).maybeSingle();
+    if (!conv) return { ok: false, error: "Conversation not found." };
+    if (!canEditConversation(me, conv.assigned_to as string | null)) return { ok: false, error: "Only the owner or an admin can reply to this conversation." };
+    if (files.some((f) => typeof f?.name !== "string" || typeof f?.size !== "number" || f.size <= 0)) return { ok: false, error: "Invalid file." };
+    if (files.reduce((n, f) => n + f.size, 0) > MAX_ATTACHMENT_BYTES) return { ok: false, error: "Attachments can be at most 25 MB in total." };
+    if (!(await allow(`upload:${me.id}`, 60, 600))) return { ok: false, error: "Too many uploads. Wait a moment and try again." };
+    return { ok: true, uploads: await createUploadUrls(me.id, files.map((f) => f.name.slice(0, 200))) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
 
 function validAddresses(raw: string): Address[] | null {
   const list = parseAddressList(raw);
@@ -383,18 +413,34 @@ function validAddresses(raw: string): Address[] | null {
 
 export async function sendReply(_: FormResult, form: FormData): Promise<FormResult> {
   try {
+    let attachmentsRaw: unknown = [];
+    try {
+      attachmentsRaw = JSON.parse(String(form.get("attachments") || "[]"));
+    } catch {
+      return { error: "Invalid attachments." };
+    }
     const parsed = replySchema.safeParse({
       id: form.get("id"),
       to: form.get("to"),
       cc: form.get("cc") ?? "",
-      body: form.get("body"),
+      html: form.get("html") ?? "",
+      attachments: attachmentsRaw,
       after: form.get("after") ?? "",
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     const me = await actor();
     const { id, after } = parsed.data;
-    // Browsers submit textarea line breaks as CRLF; normalise so paragraphs survive into the HTML part.
-    const body = parsed.data.body.replace(/\r\n?/g, "\n");
+    const staged = parsed.data.attachments;
+    if (staged.some((a) => !ownsStagingPath(me.id, a.path))) return { error: "An attachment could not be verified. Remove it and attach it again." };
+    // Inline photos only count if they are still in the message (the person may have deleted one).
+    const inlineCid: Record<string, string> = {};
+    staged.forEach((a, i) => {
+      if (a.inline && parsed.data.html.includes(`data-upload="${a.path}"`)) inlineCid[a.path] = `img${i + 1}.${a.path.split(".")[1]?.slice(0, 8) ?? i}@motogari`;
+    });
+    const used = staged.filter((a) => !a.inline || inlineCid[a.path]);
+    const bodyHtml = sanitizeOutgoingHtml(parsed.data.html, inlineCid);
+    const body = htmlToText(bodyHtml);
+    if (!body && !used.length) return { error: "Write a reply first." };
     const to = validAddresses(parsed.data.to);
     const cc = validAddresses(parsed.data.cc);
     if (!to?.length) return { error: "Check the recipient address." };
@@ -429,8 +475,18 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
     const quotedText = quoteSource?.body_text ? quoteSource.body_text.split("\n").map((l) => `> ${l}`).join("\n") : "";
     const text = quotedText ? `${body}\n\n${quoteHeader}\n${quotedText}` : body;
     const html = quotedText
-      ? `${textToHtml(body)}<br><div style="color:#555">${escapeHtml(quoteHeader)}</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex;color:#555">${escapeHtml(quoteSource!.body_text!).replace(/\n/g, "<br>")}</blockquote>`
-      : textToHtml(body);
+      ? `${bodyHtml}<br><div style="color:#555">${escapeHtml(quoteHeader)}</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex;color:#555">${escapeHtml(quoteSource!.body_text!).replace(/\n/g, "<br>")}</blockquote>`
+      : bodyHtml;
+
+    const files: OutgoingAttachment[] = [];
+    let totalBytes = 0;
+    for (const a of used) {
+      const data = await downloadStaged(a.path);
+      totalBytes += data.length;
+      if (totalBytes > MAX_ATTACHMENT_BYTES) return { error: "Attachments can be at most 25 MB in total." };
+      const mimeType = /^[\w.+-]+\/[\w.+-]+$/.test(a.type) ? a.type : "application/octet-stream";
+      files.push({ filename: a.name, mimeType, data, contentId: inlineCid[a.path] ?? null });
+    }
 
     const outgoing = {
       from: { name: "Motogari", email: conn.email_address },
@@ -441,6 +497,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       html,
       inReplyTo: latest?.message_id ?? null,
       references: buildReferences(latest?.references_header ?? null, latest?.message_id ?? null),
+      attachments: files,
     };
 
     let sent: { id: string; threadId: string };
@@ -471,10 +528,12 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
         subject: outgoing.subject,
         text,
         html,
-        snippet: body.slice(0, 200),
+        snippet: (body || used.map((a) => a.name).join(", ")).slice(0, 200),
         attachments: [],
       };
     }
+    // Sent: the staged copies are no longer needed (Gmail now holds the attachments).
+    await removeStaged(staged.map((a) => a.path)).catch(() => {});
     const ingested = await ingestMessage(parsedSent, { mailbox: conn.email_address.toLowerCase(), quiet: true, sentBy: me.id });
 
     const now = new Date().toISOString();

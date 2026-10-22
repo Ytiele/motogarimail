@@ -33,6 +33,14 @@ export type ParsedMessage = {
   bulk?: { listId: string | null; listUnsubscribe: string | null; precedence: string | null; autoSubmitted: string | null } | null;
 };
 
+export type OutgoingAttachment = {
+  filename: string;
+  mimeType: string;
+  data: Buffer;
+  /** Set for photos shown inside the message body (referenced from the HTML as cid:…). */
+  contentId?: string | null;
+};
+
 export type OutgoingMessage = {
   from: Address;
   to: Address[];
@@ -42,6 +50,7 @@ export type OutgoingMessage = {
   html: string;
   inReplyTo: string | null;
   references: string | null;
+  attachments?: OutgoingAttachment[];
 };
 
 export interface MailProvider {

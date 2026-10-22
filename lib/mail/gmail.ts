@@ -2,7 +2,7 @@ import "server-only";
 import { decrypt, encrypt } from "../crypto";
 import { env } from "../env";
 import { adminDb } from "../supabase/admin";
-import { buildMime, toBase64Url } from "./mime";
+import { buildMime } from "./mime";
 import { base64UrlToBuffer, parseGmailMessage, type GmailMessage, type GmailPart } from "./parse";
 import { MailAuthError, type MailProvider, type OutgoingMessage, type ParsedMessage } from "./types";
 
@@ -95,7 +95,7 @@ export class GmailProvider implements MailProvider {
   }
 
   private async call<T>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
-    const res = await fetch(`${API}${path}`, {
+    const res = await fetch(path.startsWith("https://") ? path : `${API}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${await this.token()}`, "Content-Type": "application/json", ...init.headers },
       cache: "no-store",
@@ -167,9 +167,24 @@ export class GmailProvider implements MailProvider {
   }
 
   async send(message: OutgoingMessage, threadId: string) {
-    return this.call<{ id: string; threadId: string }>("/messages/send", {
+    // The media-upload endpoint takes the raw message directly (up to 35 MB, enough for 25 MB of attachments).
+    const boundary = `mg_up_${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const body = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify({ threadId }),
+      `--${boundary}`,
+      "Content-Type: message/rfc822",
+      "",
+      buildMime(message),
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    return this.call<{ id: string; threadId: string }>(`https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`, {
       method: "POST",
-      body: JSON.stringify({ raw: toBase64Url(buildMime(message)), threadId }),
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
     });
   }
 

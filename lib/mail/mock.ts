@@ -68,7 +68,15 @@ export class MockMailProvider implements MailProvider {
       text: message.text,
       html: message.html,
       snippet: message.text.slice(0, 140),
-      attachments: [],
+      attachments: (message.attachments ?? []).map((a, i) => ({
+        partId: String(i + 2),
+        attachmentId: null,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.data.length,
+        contentId: a.contentId ?? null,
+        inlineData: a.data.toString("base64"),
+      })),
     };
     const { error } = await adminDb().from("mock_mailbox").insert({ id, thread_id: threadId, message: parsed });
     if (error) throw error;

@@ -252,6 +252,12 @@ function Message({
           <div className="mt-3 flex flex-wrap gap-2">
             {visible.map((a) => (
               <div key={a.id} className="flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm">
+                {/^image\/(png|jpe?g|gif|webp)$/i.test(a.mime_type) && (
+                  <a href={`/api/attachments/${a.id}?inline=1`} target="_blank" rel="noopener" className="shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/attachments/${a.id}?inline=1`} alt="" loading="lazy" className="h-12 w-12 rounded-lg object-cover" />
+                  </a>
+                )}
                 <span className="max-w-48 truncate font-medium" title={a.filename}>{a.filename}</span>
                 <span className="text-xs text-muted">{formatBytes(a.size)}</span>
                 <a className="text-xs font-medium text-brand-600 hover:underline" href={`/api/attachments/${a.id}?inline=1`} target="_blank" rel="noopener">View</a>
