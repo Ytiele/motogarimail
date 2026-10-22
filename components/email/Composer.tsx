@@ -40,19 +40,19 @@ export function Composer({
   }, [noteState?.nonce, noteState?.ok]);
 
   return (
-    <div className={cx("card overflow-hidden", mode === "note" && "border-amber-300")}>
+    <div className={cx("overflow-hidden rounded-2xl border bg-white shadow-[0_1px_3px_rgba(60,64,67,.3)] sm:ml-14", mode === "note" ? "border-amber-300" : "border-line")}>
       <div className="flex border-b border-line text-sm">
         <button
           type="button"
           onClick={() => setMode("reply")}
-          className={cx("flex-1 px-4 py-2.5 font-medium", mode === "reply" ? "bg-white text-ink" : "bg-stone-50 text-muted hover:text-ink")}
+          className={cx("flex-1 border-b-[3px] px-4 py-2.5 font-medium", mode === "reply" ? "border-brand-500 bg-white text-ink" : "border-transparent bg-canvas text-muted hover:text-ink")}
         >
           Reply to customer
         </button>
         <button
           type="button"
           onClick={() => setMode("note")}
-          className={cx("flex-1 px-4 py-2.5 font-medium", mode === "note" ? "bg-amber-50 text-amber-900" : "bg-stone-50 text-muted hover:text-ink")}
+          className={cx("flex-1 border-b-[3px] px-4 py-2.5 font-medium", mode === "note" ? "border-amber-400 bg-amber-50 text-amber-900" : "border-transparent bg-canvas text-muted hover:text-ink")}
         >
           Internal note
         </button>
@@ -73,7 +73,7 @@ export function Composer({
               </div>
             </div>
             <textarea
-              className="input min-h-56 font-sans leading-relaxed"
+              className="input min-h-56 rounded-xl font-sans leading-relaxed"
               name="body"
               value={body}
               onChange={(e) => setBody(e.target.value)}

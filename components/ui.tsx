@@ -40,7 +40,7 @@ export function PriorityBadge({ priority, hideNormal = false }: { priority: Prio
     low: "text-stone-500 bg-stone-100",
     normal: "text-stone-700 bg-stone-100",
     high: "text-orange-800 bg-orange-100",
-    urgent: "text-white bg-red-600",
+    urgent: "text-[#fff] bg-red-600",
   };
   return (
     <span className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide uppercase", cls[priority])}>
@@ -58,11 +58,19 @@ export function OverdueBadge() {
   );
 }
 
+// Gmail-style: each person gets a stable colour derived from their name.
+const AVATAR_COLORS = ["#d7262e", "#e8710a", "#188038", "#1a73e8", "#9334e6", "#007b83", "#b06000", "#5f6368"];
+function avatarColor(name: string | null | undefined) {
+  let h = 0;
+  for (const ch of name ?? "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
 export function Avatar({ name, size = 28 }: { name: string | null | undefined; size?: number }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-semibold text-canvas"
-      style={{ width: size, height: size, fontSize: size < 30 ? 11 : 13 }}
+      className="inline-flex shrink-0 items-center justify-center rounded-full text-[11px] font-medium text-white"
+      style={{ width: size, height: size, fontSize: size < 30 ? 11 : size < 38 ? 13 : 16, background: avatarColor(name), color: "#fff" }}
       aria-hidden
     >
       {initials(name)}
@@ -82,9 +90,9 @@ export function Assignee({ name }: { name: string | null | undefined }) {
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-[22px] font-normal text-ink">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -94,8 +102,10 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 
 export function EmptyState({ title, body, action }: { title: string; body?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="card flex flex-col items-center px-6 py-14 text-center">
-      <div className="mb-3 h-10 w-10 rounded-full border-2 border-dashed border-line" />
+    <div className="flex flex-col items-center px-6 py-16 text-center">
+      <svg className="mb-3 text-stone-300" width="48" height="48" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden>
+        <path d="M3 11l2-7h10l2 7v5H3v-5zm0 0h4l1 2h4l1-2h4" />
+      </svg>
       <p className="font-medium">{title}</p>
       {body && <p className="mt-1 max-w-md text-sm text-muted">{body}</p>}
       {action && <div className="mt-4">{action}</div>}

@@ -63,88 +63,82 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   return (
     <>
       <MarkOpened id={c.id} />
-      <div className="mb-4">
-        <Link href="/inbox" className="text-sm text-muted hover:text-ink">← Inbox</Link>
+      {/* Gmail-style thread toolbar */}
+      <div className="-mt-2 mb-2 flex items-center gap-1">
+        <Link href="/inbox" className="icon-btn" aria-label="Back to inbox" title="Back to inbox">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M16 10H4M9 5l-5 5 5 5" />
+          </svg>
+        </Link>
       </div>
 
-      {/* Header */}
-      <div className="card mb-4 p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <StatusBadge status={c.status} size="lg" />
-              <PriorityBadge priority={c.priority} />
-              {overdue && <OverdueBadge />}
-              {c.reopened_count > 0 && (
-                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-blue-800 uppercase">Reopened ×{c.reopened_count}</span>
-              )}
-            </div>
-            <h1 className="text-xl font-semibold tracking-tight break-words sm:text-2xl">{c.subject}</h1>
-            <dl className="mt-3 grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
-              <dt className="text-muted">From</dt>
-              <dd className="break-all">{c.customer_name ? `${c.customer_name} <${c.customer_email}>` : c.customer_email}</dd>
-              <dt className="text-muted">To</dt>
-              <dd className="break-all">{firstInbound?.recipient_email ?? "—"}</dd>
-              <dt className="text-muted">Received</dt>
-              <dd className="tabular">{formatDateTime(c.first_inbound_at ?? c.created_at)}</dd>
-              {c.sla_due_at && !closed && c.status !== "waiting" && (
-                <>
-                  <dt className="text-muted">Due</dt>
-                  <dd className={cx("tabular", overdue && "font-semibold text-red-700")}>
-                    {formatDateTime(c.sla_due_at)} ({overdue ? `overdue by ${formatRelative(c.sla_due_at).replace(" ago", "")}` : formatRelative(c.sla_due_at)})
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-          <div className="shrink-0 rounded-lg bg-stone-50 p-3 lg:w-64">
-            <div className="label">Owner</div>
-            <div className="mb-2">
-              {(c.status === "no_action" || isJunk) && !c.assigned_to ? (
-                <span className="text-sm text-muted">No owner needed</span>
-              ) : (
-                <Assignee name={c.assigned_to ? names.get(c.assigned_to) : null} />
-              )}
-            </div>
-            <div className="label mt-3">Seen by</div>
-            {viewers.length ? (
-              <div className="flex flex-wrap gap-1">
-                {viewers.map((v) => (
-                  <span key={v} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-line">
-                    <Avatar name={names.get(v)} size={16} /> {names.get(v)}
-                  </span>
-                ))}
-              </div>
+      {/* Subject line with labels, as in a Gmail thread */}
+      <div className="mb-4 pl-1 sm:pl-14">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-[22px] leading-tight font-normal break-words text-ink">{c.subject}</h1>
+          <StatusBadge status={c.status} />
+          <PriorityBadge priority={c.priority} />
+          {overdue && <OverdueBadge />}
+          {c.reopened_count > 0 && (
+            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-blue-800 uppercase">Reopened ×{c.reopened_count}</span>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+          <span className="break-all">From <span className="text-ink-2">{c.customer_name ? `${c.customer_name} <${c.customer_email}>` : c.customer_email}</span></span>
+          <span className="break-all">To <span className="text-ink-2">{firstInbound?.recipient_email ?? "—"}</span></span>
+          <span className="tabular">Received <span className="text-ink-2">{formatDateTime(c.first_inbound_at ?? c.created_at)}</span></span>
+          {c.sla_due_at && !closed && c.status !== "waiting" && (
+            <span className={cx("tabular", overdue && "font-semibold text-red-700")}>
+              Due {formatDateTime(c.sla_due_at)} ({overdue ? `overdue by ${formatRelative(c.sla_due_at).replace(" ago", "")}` : formatRelative(c.sla_due_at)})
+            </span>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <span className="flex items-center gap-2">
+            <span className="text-xs text-muted">Owner</span>
+            {(c.status === "no_action" || isJunk) && !c.assigned_to ? (
+              <span className="text-sm text-muted">No owner needed</span>
             ) : (
-              <div className="text-xs text-muted">Nobody yet</div>
+              <Assignee name={c.assigned_to ? names.get(c.assigned_to) : null} />
             )}
-            <p className="mt-2 text-[11px] leading-snug text-muted">Being seen does not mean handled. Only the status above says that.</p>
-          </div>
+          </span>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted" title="Being seen does not mean handled. Only the status says that.">Seen by</span>
+            {viewers.length ? (
+              viewers.map((v) => (
+                <span key={v} className="inline-flex items-center gap-1 rounded-full bg-stone-100 py-0.5 pr-2 pl-0.5 text-xs">
+                  <Avatar name={names.get(v)} size={18} /> {names.get(v)}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-muted">nobody yet</span>
+            )}
+          </span>
         </div>
         {c.status === "no_action" && (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+          <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-800">
             <strong>Filed as no action needed</strong>
             {c.filed_reason ? ` — ${c.filed_reason}.` : "."} It does not need an owner, is not counted as work and never goes overdue.
             If it does need a reply, use “This needs action” on the right.
           </div>
         )}
         {isJunk && (
-          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+          <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-900">
             <strong>In Junk</strong>
             {c.filed_reason ? ` — ${c.filed_reason}.` : "."} It is not counted as work and never goes overdue.
             Do not click links or open attachments unless you trust the sender. If this is a real customer, use “Not junk” on the right.
           </div>
         )}
         {c.status === "new" && !c.assigned_to && (
-          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <div className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-900">
             <strong>Nobody owns this yet.</strong> Opening it does not change anything — it stays <strong>New</strong> until someone takes ownership.
           </div>
         )}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         {/* Conversation */}
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-4">
           {items.map((it) =>
             it.kind === "email" ? (
               <Message
@@ -154,7 +148,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
                 senderName={it.email.sent_by ? names.get(it.email.sent_by) : undefined}
               />
             ) : (
-              <div key={it.note.id} className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:ml-10">
+              <div key={it.note.id} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:ml-14">
                 <div className="mb-1 flex items-center justify-between gap-2 text-xs">
                   <span className="font-semibold tracking-wide text-amber-900 uppercase">Internal note · {names.get(it.note.user_id)}</span>
                   <span className="tabular text-amber-800">{formatDateTime(it.note.created_at)}</span>
@@ -176,12 +170,12 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
 
         {/* Side panel */}
         <aside className="grid gap-4 self-start md:grid-cols-2 xl:sticky xl:top-6 xl:grid-cols-1">
-          <div className="card p-4">
-            <div className="mb-3 text-sm font-semibold">Ownership</div>
+          <div className="rounded-2xl bg-canvas p-4">
+            <div className="mb-3 text-sm font-medium text-ink">Ownership</div>
             <OwnershipControl id={c.id} assignedTo={c.assigned_to} meId={me.id} isAdmin={isAdmin} closed={closed} staff={activeStaff} />
           </div>
-          <div className="card p-4">
-            <div className="mb-3 text-sm font-semibold">Workflow</div>
+          <div className="rounded-2xl bg-canvas p-4">
+            <div className="mb-3 text-sm font-medium text-ink">Workflow</div>
             <WorkflowControls
               id={c.id}
               status={c.status}
@@ -193,12 +187,12 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
               hasAssignee={!!c.assigned_to}
             />
           </div>
-          <div className="card p-4">
-            <div className="mb-3 text-sm font-semibold">Junk</div>
+          <div className="rounded-2xl bg-canvas p-4">
+            <div className="mb-3 text-sm font-medium text-ink">Junk</div>
             <JunkControl id={c.id} status={c.status} senderEmail={c.customer_email} canEdit={canEdit} />
           </div>
-          <div className="card p-4">
-            <div className="mb-3 text-sm font-semibold">Activity</div>
+          <div className="rounded-2xl bg-canvas p-4">
+            <div className="mb-3 text-sm font-medium text-ink">Activity</div>
             {evts.length ? <ActivityList events={evts} names={names} /> : <p className="text-sm text-muted">No activity yet.</p>}
           </div>
         </aside>
@@ -222,47 +216,51 @@ function Message({
   const cc = parseAddressList(email.cc);
 
   return (
-    <article className={cx("card overflow-hidden", outbound && "border-brand-100 sm:ml-10")}>
-      <header className={cx("flex items-start justify-between gap-3 border-b px-4 py-3", outbound ? "border-brand-100 bg-brand-50" : "border-line bg-stone-50/60")}>
-        <div className="flex min-w-0 items-start gap-3">
-          <Avatar name={outbound ? (senderName ?? "Motogari") : (email.sender_name ?? email.sender_email)} size={32} />
-          <div className="min-w-0 text-sm">
-            <div className="font-semibold">
+    <article className={cx("border-b border-line pb-4", outbound && "sm:pl-6")}>
+      <header className="flex items-start gap-3 py-2">
+        <Avatar name={outbound ? (senderName ?? "Motogari") : (email.sender_name ?? email.sender_email)} size={40} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0 truncate text-sm">
               {outbound ? (
                 <>
-                  Motogari{senderName ? <span className="font-normal text-muted"> · sent by {senderName}</span> : <span className="font-normal text-muted"> · sent from Gmail</span>}
+                  <span className="font-bold text-ink">Motogari</span>
+                  <span className="text-xs text-muted"> {senderName ? `· sent by ${senderName}` : "· sent from Gmail"}</span>
                 </>
               ) : (
-                email.sender_name ?? email.sender_email
+                <>
+                  <span className="font-bold text-ink">{email.sender_name ?? email.sender_email}</span>
+                  {email.sender_name && <span className="text-xs text-muted"> &lt;{email.sender_email}&gt;</span>}
+                </>
               )}
             </div>
-            <div className="truncate text-xs text-muted">
-              {outbound ? `To ${email.recipient_email}` : email.sender_email}
-              {cc.length > 0 && ` · Cc ${cc.map((a) => a.email).join(", ")}`}
-            </div>
+            <div className="tabular shrink-0 text-xs text-muted">{formatDateTime(email.received_at)}</div>
+          </div>
+          <div className="truncate text-xs text-muted">
+            to {outbound ? email.recipient_email : "Motogari"}
+            {cc.length > 0 && `, cc ${cc.map((a) => a.email).join(", ")}`}
           </div>
         </div>
-        <div className="tabular shrink-0 text-xs text-muted">{formatDateTime(email.received_at)}</div>
       </header>
-      <div className="px-4 py-3">
+      <div className="sm:pl-[52px]">
         {email.body_html ? (
           <EmailFrame html={sanitizeEmailHtml(email.body_html, cidMap)} />
         ) : (
-          <div className="text-sm leading-relaxed break-words whitespace-pre-wrap">{email.body_text || <span className="text-muted">(empty message)</span>}</div>
+          <div className="py-2 text-sm leading-relaxed break-words whitespace-pre-wrap">{email.body_text || <span className="text-muted">(empty message)</span>}</div>
+        )}
+        {visible.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {visible.map((a) => (
+              <div key={a.id} className="flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm">
+                <span className="max-w-48 truncate font-medium" title={a.filename}>{a.filename}</span>
+                <span className="text-xs text-muted">{formatBytes(a.size)}</span>
+                <a className="text-xs font-medium text-brand-600 hover:underline" href={`/api/attachments/${a.id}?inline=1`} target="_blank" rel="noopener">View</a>
+                <a className="text-xs font-medium text-brand-600 hover:underline" href={`/api/attachments/${a.id}`}>Download</a>
+              </div>
+            ))}
+          </div>
         )}
       </div>
-      {visible.length > 0 && (
-        <footer className="flex flex-wrap gap-2 border-t border-line px-4 py-3">
-          {visible.map((a) => (
-            <div key={a.id} className="flex items-center gap-2 rounded-lg border border-line bg-stone-50 px-2.5 py-1.5 text-sm">
-              <span className="max-w-48 truncate font-medium" title={a.filename}>{a.filename}</span>
-              <span className="text-xs text-muted">{formatBytes(a.size)}</span>
-              <a className="text-xs font-medium text-brand-700 hover:underline" href={`/api/attachments/${a.id}?inline=1`} target="_blank" rel="noopener">View</a>
-              <a className="text-xs font-medium text-brand-700 hover:underline" href={`/api/attachments/${a.id}`}>Download</a>
-            </div>
-          ))}
-        </footer>
-      )}
     </article>
   );
 }

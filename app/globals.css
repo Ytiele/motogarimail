@@ -1,13 +1,16 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --color-canvas: #f6f5f2;
-  --color-ink: #2b2c30;
-  --color-ink-2: #3a3b40;
-  --color-side: #ffffff;
-  --color-line: #e6e3dc;
-  --color-muted: #6b6f78;
+  --font-sans: var(--font-roboto), Roboto, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  /* Gmail-style neutrals: tinted canvas behind a white content panel. */
+  --color-canvas: #f6f8fc;
+  --color-ink: #1f1f1f;
+  --color-ink-2: #3c4043;
+  --color-side: #f6f8fc;
+  --color-line: #e3e6ea;
+  --color-muted: #5f6368;
+  --color-search: #e9eef6;
+  --color-hover: #f2f4f8;
   --color-brand-50: #fdeced;
   --color-brand-100: #fad3d5;
   --color-brand-500: #d7262e;
@@ -22,13 +25,15 @@
  */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-canvas: #121317;
-  --color-ink: #ecebe8;
-  --color-ink-2: #d6d5d2;
-  --color-side: #1b1c20;
-  --color-line: #30333a;
-  --color-muted: #9fa2aa;
-  --color-white: #1b1d22;
+  --color-canvas: #111214;
+  --color-ink: #e8eaed;
+  --color-ink-2: #d6d8dc;
+  --color-side: #111214;
+  --color-line: #33363c;
+  --color-muted: #9aa0a6;
+  --color-search: #26282c;
+  --color-hover: #26282d;
+  --color-white: #1d1e21;
   --color-black: #000;
   --color-brand-50: #2d1517;
   --color-brand-100: #45191d;
@@ -101,8 +106,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  border-radius: 9999px;
+  padding: 0.5rem 1rem;
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 500;
@@ -121,13 +126,13 @@ body {
   @apply btn bg-ink text-canvas hover:bg-ink-2;
 }
 @utility btn-brand {
-  @apply btn bg-brand-500 text-white hover:bg-brand-600;
+  @apply btn bg-brand-500 text-[#fff] hover:bg-brand-600;
 }
 @utility btn-secondary {
-  @apply btn border border-line bg-white text-ink hover:bg-stone-50;
+  @apply btn border border-line bg-white text-ink hover:bg-hover;
 }
 @utility btn-ghost {
-  @apply btn text-muted hover:bg-stone-100 hover:text-ink;
+  @apply btn text-muted hover:bg-hover hover:text-ink;
 }
 @utility btn-danger {
   @apply btn border border-red-200 bg-white text-red-700 hover:bg-red-50;
@@ -139,7 +144,11 @@ body {
   @apply mb-1 block text-xs font-medium tracking-wide text-muted uppercase;
 }
 @utility card {
-  @apply rounded-xl border border-line bg-white;
+  @apply rounded-2xl border border-line bg-white;
+}
+/* Round icon button, as in Gmail's toolbars. */
+@utility icon-btn {
+  @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-hover hover:text-ink;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -149,8 +158,9 @@ body {
   }
 }
 
-/* Room for the fixed desktop sidebar; the collapsed rail is much narrower. */
+/* Room for the fixed top bar and desktop sidebar; the collapsed rail is icon-width (Gmail layout). */
+#app-shell { padding-top: 4rem; }
 @media (min-width: 64rem) {
   #app-shell { padding-left: 16rem; }
-  #app-shell[data-sidebar="collapsed"] { padding-left: 3.5rem; }
+  #app-shell[data-sidebar="collapsed"] { padding-left: 4.5rem; }
 }

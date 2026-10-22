@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { InboxList } from "@/components/inbox/InboxList";
-import { cx, EmptyState, PageHeader } from "@/components/ui";
+import { cx, EmptyState } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import type { Category, InboxCounts, InboxRow } from "@/lib/types";
 import { PRIORITIES, PRIORITY_LABEL } from "@/lib/workflow";
@@ -66,15 +66,36 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     return s ? `/inbox?${s}` : "/inbox";
   };
 
+  const from = total ? (page - 1) * PAGE_SIZE + 1 : 0;
+  const to = (page - 1) * PAGE_SIZE + list.length;
+  const viewLabel = VIEWS.find((v) => v.key === view)?.label ?? "All";
+  const chip = "h-8 w-auto rounded-full border border-line bg-white px-3 text-sm text-ink-2 hover:bg-hover focus:border-brand-500 focus:outline-none";
+  const pager = (
+    <div className="flex items-center gap-1 text-xs text-muted">
+      <span className="tabular px-2">{total ? `${from}–${to} of ${total}` : "0"}</span>
+      {page > 1 ? (
+        <Link className="icon-btn h-9 w-9" href={qs({ page: String(page - 1) })} aria-label="Newer">‹</Link>
+      ) : (
+        <span className="icon-btn h-9 w-9 opacity-30">‹</span>
+      )}
+      {page * PAGE_SIZE < total ? (
+        <Link className="icon-btn h-9 w-9" href={qs({ page: String(page + 1) })} aria-label="Older">›</Link>
+      ) : (
+        <span className="icon-btn h-9 w-9 opacity-30">›</span>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <PageHeader
-        title="Inbox"
-        subtitle={`${isAdmin ? "Every conversation, one shared record each." : "Your emails, plus unassigned emails waiting for an owner."} Status shows whether it is handled, not whether someone opened it.`}
-      />
+      <h1 className="sr-only">Inbox — {viewLabel}</h1>
+      <p className="mb-3 text-xs text-muted">
+        {isAdmin ? "Every conversation, one shared record each." : "Your emails, plus unassigned emails waiting for an owner."} Status shows whether it is handled, not whether someone opened it.
+      </p>
 
-      <div className="-mx-4 mb-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div className="flex gap-1 border-b border-line">
+      {/* Gmail-style category tabs */}
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="flex border-b border-line">
           {VIEWS.map((v) => {
             const n = v.countKey ? c?.[v.countKey] : undefined;
             const active = v.key === view;
@@ -83,13 +104,18 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                 key={v.key}
                 href={qs({ view: v.key, page: undefined })}
                 className={cx(
-                  "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm whitespace-nowrap",
-                  active ? "border-brand-500 font-semibold text-ink" : "border-transparent text-muted hover:text-ink",
+                  "-mb-px flex h-12 items-center gap-2 border-b-[3px] px-4 text-sm whitespace-nowrap hover:bg-hover",
+                  active ? "border-brand-500 font-medium text-brand-600" : "border-transparent text-muted",
                 )}
               >
                 {v.label}
                 {!!n && (
-                  <span className={cx("tabular rounded-full px-1.5 text-xs", (v.key === "overdue" || v.key === "unassigned") ? "bg-red-100 text-red-800" : "bg-stone-200 text-stone-700")}>
+                  <span
+                    className={cx(
+                      "tabular rounded-full px-1.5 text-[11px] font-medium",
+                      v.key === "overdue" || v.key === "unassigned" ? "bg-brand-500 text-white" : "bg-stone-200 text-stone-700",
+                    )}
+                  >
                     {n}
                   </span>
                 )}
@@ -99,30 +125,37 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         </div>
       </div>
 
-      <form method="get" className="card mb-4 grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[2fr_1fr_1fr_1fr_auto_auto_auto]">
-        {view !== "all" && <input type="hidden" name="view" value={view} />}
-        <input className="input sm:col-span-2 lg:col-span-3 2xl:col-span-1" type="search" name="q" defaultValue={filter.q} placeholder="Search sender, subject, message…" aria-label="Search" />
-        {isAdmin ? (
-          <select className="input" name="staff" defaultValue={filter.staff ?? ""} aria-label="Assigned staff">
-            <option value="">Any staff</option>
-            {(staff ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      {/* Toolbar: filter chips (like Gmail's search chips) + pager */}
+      <div className="flex flex-col gap-2 py-2 lg:flex-row lg:items-center lg:justify-between">
+        <form method="get" className="flex flex-wrap items-center gap-2">
+          {view !== "all" && <input type="hidden" name="view" value={view} />}
+          {filter.q && <input type="hidden" name="q" value={filter.q} />}
+          {isAdmin ? (
+            <select className={chip} name="staff" defaultValue={filter.staff ?? ""} aria-label="Assigned staff">
+              <option value="">Any staff</option>
+              {(staff ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          ) : null}
+          <select className={chip} name="category" defaultValue={filter.category ?? ""} aria-label="Category">
+            <option value="">Any category</option>
+            {((categories as Category[]) ?? []).map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
           </select>
-        ) : null}
-        <select className="input" name="category" defaultValue={filter.category ?? ""} aria-label="Category">
-          <option value="">Any category</option>
-          {((categories as Category[]) ?? []).map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-        </select>
-        <select className="input" name="priority" defaultValue={filter.priority ?? ""} aria-label="Priority">
-          <option value="">Any priority</option>
-          {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
-        </select>
-        <input className="input" type="date" name="from" defaultValue={filter.from} aria-label="From date" />
-        <input className="input" type="date" name="to" defaultValue={filter.to} aria-label="To date" />
-        <div className="flex gap-2">
-          <button className="btn-primary flex-1">Apply</button>
-          {hasFilters && <Link href={qs({ q: undefined, staff: undefined, category: undefined, priority: undefined, from: undefined, to: undefined, page: undefined })} className="btn-ghost">Clear</Link>}
-        </div>
-      </form>
+          <select className={chip} name="priority" defaultValue={filter.priority ?? ""} aria-label="Priority">
+            <option value="">Any priority</option>
+            {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+          </select>
+          <input className={chip} type="date" name="from" defaultValue={filter.from} aria-label="From date" />
+          <input className={chip} type="date" name="to" defaultValue={filter.to} aria-label="To date" />
+          <button className="h-8 rounded-full bg-ink px-4 text-sm font-medium text-canvas hover:bg-ink-2">Apply</button>
+          {hasFilters && (
+            <Link href={qs({ q: undefined, staff: undefined, category: undefined, priority: undefined, from: undefined, to: undefined, page: undefined })} className="h-8 rounded-full px-3 text-sm leading-8 text-brand-600 hover:bg-hover">
+              Clear filters
+            </Link>
+          )}
+          {filter.q && <span className="text-sm text-muted">Results for “{filter.q}”</span>}
+        </form>
+        <div className="self-end lg:self-auto">{pager}</div>
+      </div>
 
       {error ? (
         <EmptyState title="Could not load the inbox" body="Please refresh. If this keeps happening, contact your administrator." />
@@ -134,15 +167,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
       ) : (
         <>
           <InboxList rows={list} />
-          <div className="mt-4 flex items-center justify-between text-sm text-muted">
-            <span className="tabular">
-              {(page - 1) * PAGE_SIZE + 1}–{(page - 1) * PAGE_SIZE + list.length} of {total}
-            </span>
-            <div className="flex gap-2">
-              {page > 1 && <Link className="btn-secondary" href={qs({ page: String(page - 1) })}>Previous</Link>}
-              {page * PAGE_SIZE < total && <Link className="btn-secondary" href={qs({ page: String(page + 1) })}>Next</Link>}
-            </div>
-          </div>
+          <div className="mt-2 flex justify-end">{pager}</div>
         </>
       )}
     </>

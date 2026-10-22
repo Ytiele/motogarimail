@@ -34,7 +34,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         />
       </Suspense>
       <RealtimeBridge userId={user.id} />
-      <main className="mx-auto max-w-7xl px-4 pt-20 pb-16 sm:px-6 lg:px-8 lg:pt-8">{children}</main>
+      {/* Gmail-style white content panel floating on the tinted canvas. */}
+      <main className="min-h-[calc(100vh-4rem)] bg-white px-4 py-5 sm:px-6 lg:mr-4 lg:mb-4 lg:min-h-[calc(100vh-5rem)] lg:rounded-2xl lg:px-8">
+        <div className="mx-auto max-w-[96rem]">{children}</div>
+      </main>
     </div>
   );
 }
