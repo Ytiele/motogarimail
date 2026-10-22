@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { logout } from "@/app/(auth)/actions";
 import { Logo } from "@/components/auth/AuthCard";
+import { ChatLauncher } from "@/components/chat/ChatLauncher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
 import { SIDEBAR_COOKIE } from "@/lib/theme";
@@ -232,6 +233,7 @@ export function Sidebar({
               {syncHealth === "missing" ? "Gmail not connected" : "Sync needs attention"}
             </Link>
           )}
+          <ChatLauncher me={{ id: user.id, name: user.name }} />
           <Link href="/notifications" className="icon-btn relative" aria-label={`${unread} unread notifications`} title="Notifications">
             <Icon name="bell" />
             {unread > 0 && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-brand-500" />}
