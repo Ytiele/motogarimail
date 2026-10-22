@@ -178,7 +178,7 @@ export function WorkflowControls({
             id="category"
             className="input"
             value={categoryId ?? ""}
-            disabled={pending}
+            disabled={pending || !canEdit}
             onChange={(e) => run(() => setCategory(id, e.target.value || null))}
           >
             <option value="">None</option>
@@ -186,7 +186,7 @@ export function WorkflowControls({
           </select>
         </div>
       </div>
-      {!canEdit && <p className="text-xs text-muted">Only the owner or an admin can change status and priority.</p>}
+      {!canEdit && <p className="text-xs text-muted">Only the owner or an admin can change status, priority and category.</p>}
       <Feedback result={result} />
     </div>
   );

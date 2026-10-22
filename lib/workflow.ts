@@ -84,8 +84,9 @@ export function canSetStatus(opts: {
   return { ok: true };
 }
 
-// Mirrors the conversations RLS policy: admins see all; staff see their own and unassigned.
-export function canViewConversation(viewer: { id: string; role: Role }, assignedTo: string | null) {
+// Every active staff member can SEE every conversation (mirrors the RLS policy). Acting on one is
+// narrower: the owner, an admin, or anyone while it is still unassigned.
+export function canEditConversation(viewer: { id: string; role: Role }, assignedTo: string | null) {
   return viewer.role === "admin" || assignedTo === null || assignedTo === viewer.id;
 }
 

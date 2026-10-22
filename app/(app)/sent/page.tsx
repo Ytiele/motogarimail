@@ -19,7 +19,7 @@ type SentRow = {
 
 export default async function SentPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   const sp = await searchParams;
-  const { user: me, supabase } = await requireUser();
+  const { supabase } = await requireUser();
   const page = Math.max(1, Number(sp.page) || 1);
   // Commas and parentheses would break the PostgREST or() filter; they are never needed to find an address or subject.
   const q = sp.q?.trim().slice(0, 100).replace(/[,()*%\\]/g, " ").trim() || undefined;
@@ -43,7 +43,7 @@ export default async function SentPage({ searchParams }: { searchParams: Promise
     <>
       <PageHeader
         title="Sent"
-        subtitle={`Every reply sent from the Motogari mailbox${me.role === "admin" ? "" : " on your conversations and unassigned ones"}, newest first — from the dashboard or directly from Gmail.`}
+        subtitle="Every reply sent from the Motogari mailbox, newest first — from the dashboard or directly from Gmail."
       />
       <form method="get" className="card mb-4 flex gap-2 p-3">
         <input className="input flex-1" type="search" name="q" defaultValue={q} placeholder="Search recipient or subject…" aria-label="Search sent mail" />

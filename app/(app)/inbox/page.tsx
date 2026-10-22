@@ -31,7 +31,6 @@ type SP = Record<string, string | undefined>;
 export default async function InboxPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const { user: me, supabase } = await requireUser();
-  const isAdmin = me.role === "admin";
 
   const view = VIEWS.some((v) => v.key === sp.view) ? sp.view! : "all";
   const page = Math.max(1, Number(sp.page) || 1);
@@ -90,7 +89,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     <>
       <h1 className="sr-only">Inbox — {viewLabel}</h1>
       <p className="mb-3 text-xs text-muted">
-        {isAdmin ? "Every conversation, one shared record each." : "Your emails, plus unassigned emails waiting for an owner."} Status shows whether it is handled, not whether someone opened it.
+        Every conversation, one shared record each — the whole team sees the same inbox. Status shows whether it is handled, not whether someone opened it.
       </p>
 
       {/* Gmail-style category tabs */}
@@ -130,12 +129,10 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         <form method="get" className="flex flex-wrap items-center gap-2">
           {view !== "all" && <input type="hidden" name="view" value={view} />}
           {filter.q && <input type="hidden" name="q" value={filter.q} />}
-          {isAdmin ? (
-            <select className={chip} name="staff" defaultValue={filter.staff ?? ""} aria-label="Assigned staff">
-              <option value="">Any staff</option>
-              {(staff ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          ) : null}
+          <select className={chip} name="staff" defaultValue={filter.staff ?? ""} aria-label="Assigned staff">
+            <option value="">Any staff</option>
+            {(staff ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
           <select className={chip} name="category" defaultValue={filter.category ?? ""} aria-label="Category">
             <option value="">Any category</option>
             {((categories as Category[]) ?? []).map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}

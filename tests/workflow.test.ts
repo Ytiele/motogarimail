@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSetStatus, canViewConversation, isOverdue, startsWork, statusOnAssign, statusOnInbound, statusOnOpen, statusOnReply, STATUSES } from "@/lib/workflow";
+import { canEditConversation, canSetStatus, isOverdue, startsWork, statusOnAssign, statusOnInbound, statusOnOpen, statusOnReply, STATUSES } from "@/lib/workflow";
 
 describe("core rule: opening is not handling", () => {
   it("never changes status when a conversation is opened", () => {
@@ -86,15 +86,15 @@ describe("no action needed (newsletters / notifications)", () => {
   });
 });
 
-describe("canViewConversation", () => {
+describe("canEditConversation", () => {
   const staff = { id: "jane", role: "staff" as const };
-  it("staff see their own and unassigned, never other people's", () => {
-    expect(canViewConversation(staff, "jane")).toBe(true);
-    expect(canViewConversation(staff, null)).toBe(true);
-    expect(canViewConversation(staff, "brian")).toBe(false);
+  it("staff act on their own and unassigned conversations, not other people's", () => {
+    expect(canEditConversation(staff, "jane")).toBe(true);
+    expect(canEditConversation(staff, null)).toBe(true);
+    expect(canEditConversation(staff, "brian")).toBe(false);
   });
-  it("admins see everything", () => {
-    expect(canViewConversation({ id: "ceo", role: "admin" }, "brian")).toBe(true);
+  it("admins can act on everything", () => {
+    expect(canEditConversation({ id: "ceo", role: "admin" }, "brian")).toBe(true);
   });
 });
 

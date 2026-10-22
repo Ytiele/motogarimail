@@ -18,7 +18,7 @@ import { adminDb } from "@/lib/supabase/admin";
 import type { ActionResult, AppUser, Conversation, EmailRow } from "@/lib/types";
 import {
   canSetStatus,
-  canViewConversation,
+  canEditConversation,
   PRIORITIES,
   startsWork,
   STATUS_LABEL,
@@ -52,10 +52,10 @@ async function userName(id: string | null) {
   return (data?.name as string) ?? null;
 }
 
-async function viewError(me: AppUser, id: string): Promise<string | null> {
-  const { data } = await adminDb().from("conversations").select("assigned_to").eq("id", id).maybeSingle();
-  if (!data) return "Conversation not found.";
-  return canViewConversation(me, data.assigned_to as string | null) ? null : "This conversation is assigned to someone else.";
+// All active staff can see every conversation (and add internal notes); `me` is already an active user.
+async function viewError(_me: AppUser, id: string): Promise<string | null> {
+  const { data } = await adminDb().from("conversations").select("id").eq("id", id).maybeSingle();
+  return data ? null : "Conversation not found.";
 }
 
 async function recordAssignment(conversationId: string, from: string | null, to: string | null, by: string) {
@@ -334,7 +334,7 @@ export async function setCategory(id: string, categoryId: string | null): Promis
       name = data.name;
     }
     const r = await mutateConversation(id, (c) => {
-      if (!canViewConversation(me, c.assigned_to)) return { error: "This conversation is assigned to someone else." };
+      if (!canEditConversation(me, c.assigned_to)) return { error: "Only the owner or an admin can change the category." };
       return c.category_id === categoryId ? null : { category_id: categoryId, last_activity_at: new Date().toISOString() };
     });
     if (!r.ok) return { ok: false, error: r.error };
