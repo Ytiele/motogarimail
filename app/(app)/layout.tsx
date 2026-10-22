@@ -1,8 +1,10 @@
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { RealtimeBridge } from "@/components/shell/RealtimeBridge";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { requireUser } from "@/lib/auth";
 import { getPublicConnection } from "@/lib/mail/connection";
+import { SIDEBAR_COOKIE } from "@/lib/theme";
 import type { InboxCounts } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -15,11 +17,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     user.role === "admin" ? getPublicConnection() : Promise.resolve(null),
   ]);
 
+  const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
   const syncHealth =
     user.role !== "admin" ? null : !conn ? "missing" : conn.status === "connected" ? "ok" : "attention";
 
   return (
-    <div className="lg:pl-64">
+    <div id="app-shell" data-sidebar={collapsed ? "collapsed" : "open"}>
       <Suspense>
         <Sidebar
           user={{ id: user.id, name: user.name, email: user.email, role: user.role }}
@@ -27,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           unread={unread ?? 0}
           syncHealth={syncHealth}
           mockMode={conn?.provider === "mock"}
+          initialCollapsed={collapsed}
         />
       </Suspense>
       <RealtimeBridge userId={user.id} />

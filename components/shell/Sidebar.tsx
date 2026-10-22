@@ -7,9 +7,25 @@ import { logout } from "@/app/(auth)/actions";
 import { Logo } from "@/components/auth/AuthCard";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar, cx } from "@/components/ui";
+import { SIDEBAR_COOKIE } from "@/lib/theme";
 import type { InboxCounts } from "@/lib/types";
 
 type NavItem = { href: string; label: string; count?: number; alert?: boolean };
+
+const ChevronIcon = ({ flip }: { flip?: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" style={flip ? { transform: "scaleX(-1)" } : undefined}>
+    <path d="M12.5 4.5L7 10l5.5 5.5" />
+  </svg>
+);
+const BellIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 8a5 5 0 0110 0c0 5 2 6 2 6H3s2-1 2-6M8.5 17a1.7 1.7 0 003 0" /></svg>
+);
+const InboxIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 11l2-7h10l2 7v5H3v-5zm0 0h4l1 2h4l1-2h4" /></svg>
+);
+const SendIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 10l14-6-5 14-2.5-5.5L3 10z" /></svg>
+);
 
 export function Sidebar({
   user,
@@ -17,23 +33,35 @@ export function Sidebar({
   unread,
   syncHealth,
   mockMode,
+  initialCollapsed = false,
 }: {
   user: { id: string; name: string; email: string; role: "admin" | "staff" };
   counts: InboxCounts | null;
   unread: number;
   syncHealth: "ok" | "attention" | "missing" | null;
   mockMode: boolean;
+  initialCollapsed?: boolean;
 }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname, params]);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  // Desktop only: shrink the sidebar to a slim rail so the page gets the width. Remembered per browser.
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    document.cookie = `${SIDEBAR_COOKIE}=${next ? "collapsed" : "open"}; path=/; max-age=31536000; samesite=lax`;
+    const shell = document.getElementById("app-shell");
+    if (shell) shell.dataset.sidebar = next ? "collapsed" : "open";
+  };
 
   const isAdmin = user.role === "admin";
   const view = pathname === "/inbox" ? (params.get("view") ?? "all") : null;
 
   const inbox: NavItem[] = [
     { href: "/inbox", label: "All" },
+    { href: "/sent", label: "Sent" },
     { href: "/inbox?view=new", label: "New", count: counts?.new },
     { href: "/inbox?view=unassigned", label: "Unassigned", count: counts?.unassigned, alert: true },
     { href: "/inbox?view=mine", label: "My emails", count: counts?.mine },
@@ -92,10 +120,19 @@ export function Sidebar({
     <nav className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-4 py-5">
         <Logo size={30} />
-        <div className="leading-tight">
+        <div className="flex-1 leading-tight">
           <div className="font-semibold text-ink">Motogari</div>
           <div className="text-xs text-muted">Team inbox</div>
         </div>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="hidden rounded-md p-1.5 text-muted hover:bg-stone-100 hover:text-ink lg:block"
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
+        >
+          <ChevronIcon />
+        </button>
       </div>
       <div className="flex-1 space-y-6 overflow-y-auto px-3 pb-6">
         <div className="space-y-0.5">
@@ -144,7 +181,40 @@ export function Sidebar({
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-side lg:block">{nav}</aside>
+      {collapsed ? (
+        <aside className="fixed inset-y-0 left-0 z-30 hidden w-14 flex-col items-center gap-1 border-r border-line bg-side py-4 lg:flex">
+          <button type="button" onClick={toggleCollapsed} className="mb-3 rounded-md p-1" aria-label="Expand sidebar" title="Expand sidebar">
+            <Logo size={28} />
+          </button>
+          {[
+            { href: "/inbox", label: "Inbox", icon: <InboxIcon />, dot: !!counts?.unassigned },
+            { href: "/sent", label: "Sent", icon: <SendIcon />, dot: false },
+            { href: "/notifications", label: "Notifications", icon: <BellIcon />, dot: unread > 0 },
+          ].map((i) => (
+            <Link
+              key={i.href}
+              href={i.href}
+              title={i.label}
+              aria-label={i.label}
+              className={cx("relative rounded-md p-2", pathname === i.href ? "bg-stone-100 text-ink" : "text-muted hover:bg-stone-50 hover:text-ink")}
+            >
+              {i.icon}
+              {i.dot && <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-brand-500" />}
+            </Link>
+          ))}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="mt-auto rounded-md p-2 text-muted hover:bg-stone-100 hover:text-ink"
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <ChevronIcon flip />
+          </button>
+        </aside>
+      ) : (
+        <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-side lg:block">{nav}</aside>
+      )}
 
       <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur lg:hidden">
         <button onClick={() => setOpen(true)} className="btn-ghost -ml-2 px-2" aria-label="Open navigation">
@@ -154,7 +224,7 @@ export function Sidebar({
           <Logo size={24} /> Motogari
         </Link>
         <Link href="/notifications" className="relative btn-ghost -mr-2 px-2" aria-label={`${unread} unread notifications`}>
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 8a5 5 0 0110 0c0 5 2 6 2 6H3s2-1 2-6M8.5 17a1.7 1.7 0 003 0" /></svg>
+          <BellIcon />
           {unread > 0 && <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-brand-500" />}
         </Link>
       </header>

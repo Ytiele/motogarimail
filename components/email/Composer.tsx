@@ -27,12 +27,16 @@ export function Composer({
   const [noteState, noteAction, notePending] = useActionState(addNote, undefined);
   const replyForm = useRef<HTMLFormElement>(null);
   const noteForm = useRef<HTMLFormElement>(null);
+  // Kept in state (not just the DOM) so switching to "Internal note" and back never loses a half-written reply.
+  const [body, setBody] = useState(template);
+  const [note, setNote] = useState("");
 
   useEffect(() => {
-    if (replyState?.ok) replyForm.current?.reset();
+    if (replyState?.ok) setBody(template);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyState?.nonce, replyState?.ok]);
   useEffect(() => {
-    if (noteState?.ok) noteForm.current?.reset();
+    if (noteState?.ok) setNote("");
   }, [noteState?.nonce, noteState?.ok]);
 
   return (
@@ -68,7 +72,14 @@ export function Composer({
                 <input className="input" id="cc" name="cc" defaultValue={defaultCc} placeholder="Optional" />
               </div>
             </div>
-            <textarea className="input min-h-56 font-sans leading-relaxed" name="body" defaultValue={template} required aria-label="Reply" />
+            <textarea
+              className="input min-h-56 font-sans leading-relaxed"
+              name="body"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              required
+              aria-label="Reply"
+            />
             {replyState?.error && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{replyState.error}</p>}
             {replyState?.message && <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{replyState.message}</p>}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -92,6 +103,8 @@ export function Composer({
           <textarea
             className="input min-h-28 border-amber-200"
             name="note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
             required
             placeholder="Visible to Motogari staff only. Never sent to the customer."
             aria-label="Internal note"

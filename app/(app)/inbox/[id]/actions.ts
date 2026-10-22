@@ -392,7 +392,9 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     const me = await actor();
-    const { id, body, after } = parsed.data;
+    const { id, after } = parsed.data;
+    // Browsers submit textarea line breaks as CRLF; normalise so paragraphs survive into the HTML part.
+    const body = parsed.data.body.replace(/\r\n?/g, "\n");
     const to = validAddresses(parsed.data.to);
     const cc = validAddresses(parsed.data.cc);
     if (!to?.length) return { error: "Check the recipient address." };

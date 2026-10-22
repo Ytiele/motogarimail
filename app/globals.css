@@ -148,3 +148,9 @@ body {
     animation: none !important;
   }
 }
+
+/* Room for the fixed desktop sidebar; the collapsed rail is much narrower. */
+@media (min-width: 64rem) {
+  #app-shell { padding-left: 16rem; }
+  #app-shell[data-sidebar="collapsed"] { padding-left: 3.5rem; }
+}
