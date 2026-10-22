@@ -4,6 +4,8 @@ export type AppUser = {
   id: string;
   name: string;
   email: string;
+  /** Set for staff who sign in with their phone number instead of an email. */
+  phone: string | null;
   role: Role;
   department: string | null;
   avatar_url: string | null;

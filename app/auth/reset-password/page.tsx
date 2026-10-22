@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AuthCard } from "@/components/auth/AuthCard";
+import { isPhoneLoginEmail } from "@/lib/phone";
 import { NewPasswordForm } from "@/components/auth/forms";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,7 +19,7 @@ export default async function ResetPasswordPage() {
     );
   }
   return (
-    <AuthCard title="Choose a new password" subtitle={user.email}>
+    <AuthCard title="Choose a new password" subtitle={isPhoneLoginEmail(user.email) ? undefined : user.email}>
       <NewPasswordForm />
     </AuthCard>
   );

@@ -8,12 +8,14 @@ import { currentUser } from "@/lib/auth";
 import { decrypt } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import { logEvent } from "@/lib/events";
+import { createInviteLink } from "@/lib/invites";
 import { getActiveConnection } from "@/lib/mail/connection";
 import { revokeToken } from "@/lib/mail/gmail";
 import { addJunkRule } from "@/lib/mail/junk";
 import { canBlockDomain, describeRule, parseJunkPattern, senderDomain } from "@/lib/mail/junk-rules";
 import { injectMockInbound, MOCK_MAILBOX_ADDRESS } from "@/lib/mail/mock";
 import { runSync } from "@/lib/mail/sync";
+import { normalizePhone, phoneLoginEmail, whatsappLink } from "@/lib/phone";
 import { adminDb } from "@/lib/supabase/admin";
 import type { AppUser } from "@/lib/types";
 import { PRIORITIES } from "@/lib/workflow";
@@ -41,9 +43,46 @@ const staffSchema = z.object({
   department: z.string().trim().max(100).optional(),
 });
 
+function inviteMessage(name: string, url: string) {
+  return `Hi ${name.split(/\s+/)[0]}, you have been added to the Motogari team inbox. Open this link to choose your password (valid for 7 days): ${url}`;
+}
+
+/** Staff without a company email: name + phone. They choose their own password through a one-time link. */
+async function createPhoneStaff(me: AppUser, form: FormData): Promise<FormResult> {
+  const parsed = staffSchema.omit({ email: true }).safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const phone = normalizePhone(String(form.get("phone") ?? ""));
+  if (!phone) return { error: "Enter a valid phone number, e.g. 0712 345 678 or +254 712 345 678." };
+  const { name, role, department } = parsed.data;
+  const db = adminDb();
+  const { data: taken } = await db.from("users").select("id").eq("phone", phone).maybeSingle();
+  if (taken) return { error: "A staff member with that phone number already exists." };
+
+  const email = phoneLoginEmail(phone);
+  // Random password nobody knows; the staff member replaces it through the set-up link.
+  const { data, error } = await db.auth.admin.createUser({ email, password: randomBytes(32).toString("base64url"), email_confirm: true, user_metadata: { name, phone } });
+  if (error || !data.user) return { error: error?.message.includes("already") ? "A staff member with that phone number already exists." : (error?.message ?? "Could not create the account.") };
+  const { error: pErr } = await db.from("users").insert({ id: data.user.id, name, email, phone, role, department: department || null });
+  if (pErr) {
+    await db.auth.admin.deleteUser(data.user.id);
+    return { error: "Could not create the staff profile." };
+  }
+  const invite = await createInviteLink(data.user.id, me.id);
+  await logEvent({ type: "staff_created", userId: me.id, metadata: { staff_id: data.user.id, name, role, sign_in: "phone" } });
+  revalidatePath("/settings/staff");
+  return {
+    ok: true,
+    message: `${name} was added. Send them this link so they can choose their password.`,
+    link: invite.url,
+    whatsapp: whatsappLink(phone, inviteMessage(name, invite.url)),
+    nonce: Date.now(),
+  };
+}
+
 export async function createStaff(_: FormResult, form: FormData): Promise<FormResult> {
   try {
     const me = await admin();
+    if (form.get("method") === "phone") return await createPhoneStaff(me, form);
     const parsed = staffSchema.safeParse(Object.fromEntries(form));
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     const { name, email, role, department } = parsed.data;
@@ -118,6 +157,19 @@ export async function resetStaffPassword(_: FormResult, form: FormData): Promise
   try {
     const me = await admin();
     const id = z.string().uuid().parse(form.get("id"));
+    const { data: staff } = await adminDb().from("users").select("name, phone").eq("id", id).maybeSingle();
+    if (staff?.phone) {
+      // Phone staff have no inbox for a temporary password; give them a fresh link to choose a new one.
+      const invite = await createInviteLink(id, me.id);
+      await logEvent({ type: "staff_updated", userId: me.id, metadata: { staff_id: id, action: "setup_link" } });
+      return {
+        ok: true,
+        message: "New set-up link created. Any earlier link no longer works.",
+        link: invite.url,
+        whatsapp: whatsappLink(staff.phone, inviteMessage(staff.name, invite.url)),
+        nonce: Date.now(),
+      };
+    }
     const password = tempPassword();
     const { error } = await adminDb().auth.admin.updateUserById(id, { password });
     if (error) return { error: error.message };

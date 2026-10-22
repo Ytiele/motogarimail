@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { hasAnyUser } from "@/lib/bootstrap";
 import { env } from "@/lib/env";
+import { consumeInvite, findValidInvite } from "@/lib/invites";
+import { isPhoneLoginEmail, normalizePhone, phoneLoginEmail } from "@/lib/phone";
 import { allow, clientIp } from "@/lib/rate-limit";
 import { adminDb } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -16,14 +18,26 @@ function safeNext(next: unknown) {
 }
 
 const loginSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Enter a valid email address").max(254),
+  identifier: z.string().trim().min(1, "Enter your email or phone number").max(254),
   password: z.string().min(1, "Enter your password").max(200),
 });
 
+/** Staff sign in with their email, or — if they have no company email — their phone number. */
+function loginEmail(identifier: string): string | null {
+  if (identifier.includes("@")) {
+    const e = z.string().toLowerCase().email().safeParse(identifier);
+    return e.success ? e.data : null;
+  }
+  const phone = normalizePhone(identifier);
+  return phone ? phoneLoginEmail(phone) : null;
+}
+
 export async function login(_: FormState, form: FormData): Promise<FormState> {
-  const parsed = loginSchema.safeParse({ email: form.get("email"), password: form.get("password") });
+  const parsed = loginSchema.safeParse({ identifier: form.get("email"), password: form.get("password") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const { email, password } = parsed.data;
+  const email = loginEmail(parsed.data.identifier);
+  if (!email) return { error: "Enter a valid email address or phone number." };
+  const { password } = parsed.data;
 
   const ip = await clientIp();
   if (!(await allow(`login:ip:${ip}`, 20, 900)) || !(await allow(`login:email:${email}`, 8, 900))) {
@@ -32,7 +46,7 @@ export async function login(_: FormState, form: FormData): Promise<FormState> {
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error || !data.user) return { error: "Incorrect email or password." };
+  if (error || !data.user) return { error: "Incorrect sign-in details or password." };
 
   const { data: profile } = await adminDb().from("users").select("is_active").eq("id", data.user.id).maybeSingle();
   if (!profile?.is_active) {
@@ -50,8 +64,12 @@ export async function logout() {
 }
 
 export async function requestPasswordReset(_: FormState, form: FormData): Promise<FormState> {
-  const parsed = z.string().trim().toLowerCase().email().max(254).safeParse(form.get("email"));
-  if (!parsed.success) return { error: "Enter a valid email address." };
+  const raw = String(form.get("email") ?? "").trim();
+  if (raw && !raw.includes("@") && normalizePhone(raw)) {
+    return { error: "Phone sign-in accounts are reset by your administrator: ask them for a new set-up link (Settings → Staff)." };
+  }
+  const parsed = z.string().trim().toLowerCase().email().max(254).safeParse(raw);
+  if (!parsed.success || isPhoneLoginEmail(parsed.data)) return { error: "Enter a valid email address." };
   const ip = await clientIp();
   if (!(await allow(`reset:ip:${ip}`, 5, 3600)) || !(await allow(`reset:email:${parsed.data}`, 3, 3600))) {
     return { error: "Too many reset requests. Please try again later." };
@@ -113,4 +131,27 @@ export async function createFirstAdmin(_: FormState, form: FormData): Promise<Fo
   const supabase = await createClient();
   await supabase.auth.signInWithPassword({ email, password });
   redirect("/settings");
+}
+
+/** Completes a one-time set-up link: the staff member chooses their own password and is signed in. */
+export async function completeInvite(_: FormState, form: FormData): Promise<FormState> {
+  const parsed = passwordSchema.safeParse({ password: form.get("password"), confirm: form.get("confirm") });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  if (!(await allow(`invite:${await clientIp()}`, 10, 3600))) return { error: "Too many attempts. Please try again later." };
+
+  const invite = await findValidInvite(String(form.get("token") ?? ""));
+  if (!invite) return { error: "This link has expired or was already used. Ask your administrator for a new one." };
+  if (!(await consumeInvite(invite.inviteId))) return { error: "This link was already used. Ask your administrator for a new one." };
+
+  const db = adminDb();
+  const { error } = await db.auth.admin.updateUserById(invite.userId, { password: parsed.data.password });
+  if (error) {
+    // Give the link back so they can try again.
+    await db.from("staff_invites").update({ used_at: null }).eq("id", invite.inviteId);
+    return { error: "Could not save your password. Please try again." };
+  }
+  const supabase = await createClient();
+  await supabase.auth.signInWithPassword({ email: invite.email, password: parsed.data.password });
+  await db.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", invite.userId);
+  redirect("/dashboard");
 }

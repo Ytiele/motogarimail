@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { createFirstAdmin, login, requestPasswordReset, updatePassword } from "@/app/(auth)/actions";
+import { completeInvite, createFirstAdmin, login, requestPasswordReset, updatePassword } from "@/app/(auth)/actions";
 import { FormMessage } from "./AuthCard";
 
 export function LoginForm({ next }: { next?: string }) {
@@ -12,8 +12,8 @@ export function LoginForm({ next }: { next?: string }) {
     <form action={action} className="space-y-5">
       <input type="hidden" name="next" value={next ?? ""} />
       <div>
-        <label className="auth-label" htmlFor="email">Email</label>
-        <input className="auth-input" id="email" name="email" type="email" autoComplete="email" required autoFocus />
+        <label className="auth-label" htmlFor="email">Email or phone number</label>
+        <input className="auth-input" id="email" name="email" type="text" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false} required autoFocus />
       </div>
       <div>
         <label className="auth-label" htmlFor="password">Password</label>
@@ -87,6 +87,31 @@ export function SetupForm() {
       </div>
       <FormMessage state={state} />
       <button className="btn-brand h-11 w-full text-[15px]" disabled={pending}>{pending ? "Creating…" : "Create admin account"}</button>
+    </form>
+  );
+}
+
+export function JoinForm({ token }: { token: string }) {
+  const [state, action, pending] = useActionState(completeInvite, undefined);
+  const [show, setShow] = useState(false);
+  return (
+    <form action={action} className="space-y-5">
+      <input type="hidden" name="token" value={token} />
+      <div>
+        <label className="auth-label" htmlFor="password">Choose a password</label>
+        <input className="auth-input" id="password" name="password" type={show ? "text" : "password"} autoComplete="new-password" minLength={10} required autoFocus />
+        <p className="mt-1.5 text-xs text-muted">At least 10 characters.</p>
+      </div>
+      <div>
+        <label className="auth-label" htmlFor="confirm">Confirm password</label>
+        <input className="auth-input" id="confirm" name="confirm" type={show ? "text" : "password"} autoComplete="new-password" minLength={10} required />
+        <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-ink-2">
+          <input type="checkbox" className="h-4 w-4 accent-brand-500" checked={show} onChange={(e) => setShow(e.target.checked)} />
+          Show password
+        </label>
+      </div>
+      <FormMessage state={state} />
+      <button className="btn-brand h-11 w-full text-[15px]" disabled={pending}>{pending ? "Saving…" : "Save password and sign in"}</button>
     </form>
   );
 }
