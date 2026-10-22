@@ -1,28 +1,63 @@
 import type { ReactNode } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-export function AuthCard({ title, subtitle, children, footer }: { title: string; subtitle?: string; children: ReactNode; footer?: ReactNode }) {
+/**
+ * Sign-in style layout (login, first-run setup, password reset), modelled on Google's account pages:
+ * a large rounded card on the tinted canvas, heading on the left, form on the right.
+ */
+export function AuthCard({
+  title,
+  subtitle,
+  children,
+  footer,
+  highlights,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  highlights?: string[];
+}) {
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <Logo />
-            <div className="leading-tight">
-              <div className="font-semibold">Motogari</div>
-              <div className="text-xs text-muted">Team inbox</div>
+    <div className="flex min-h-screen flex-col bg-canvas sm:items-center sm:justify-center sm:px-6 sm:py-10">
+      <main className="w-full flex-1 bg-white px-6 py-10 sm:max-w-[1040px] sm:flex-none sm:rounded-[28px] sm:px-10 sm:py-12 sm:shadow-[0_1px_3px_rgba(60,64,67,.15)]">
+        <div className="grid gap-10 md:grid-cols-2 md:gap-14">
+          <div>
+            <div className="flex items-center gap-3">
+              <Logo size={44} />
+              <div className="leading-tight">
+                <div className="text-lg font-medium text-ink">Motogari</div>
+                <div className="text-xs tracking-wide text-muted uppercase">Team inbox</div>
+              </div>
             </div>
+            <h1 className="mt-8 text-[32px] leading-tight font-normal text-ink sm:text-[36px]">{title}</h1>
+            {subtitle && <p className="mt-3 text-base text-ink-2">{subtitle}</p>}
+            {highlights && highlights.length > 0 && (
+              <ul className="mt-8 hidden space-y-4 md:block">
+                {highlights.map((h) => (
+                  <li key={h} className="flex items-start gap-3 text-sm text-ink-2">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M2.5 6.2l2.2 2.2 4.8-5" />
+                      </svg>
+                    </span>
+                    {h}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <div className="w-44"><ThemeToggle /></div>
+          <div className="md:pt-[4.75rem]">
+            {children}
+            {footer && <div className="mt-8 text-sm text-muted">{footer}</div>}
+          </div>
         </div>
-        <div className="card p-6 shadow-sm">
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-          {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
-          <div className="mt-5">{children}</div>
-        </div>
-        {footer && <div className="mt-4 text-center text-sm text-muted">{footer}</div>}
-      </div>
-    </main>
+      </main>
+      <footer className="flex w-full items-center justify-between gap-4 px-6 py-4 text-xs text-muted sm:max-w-[1040px] sm:px-2">
+        <div className="w-44"><ThemeToggle /></div>
+        <span className="hidden sm:inline">Motogari · Private staff workspace</span>
+      </footer>
+    </div>
   );
 }
 

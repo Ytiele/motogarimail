@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { LoginForm } from "@/components/auth/forms";
@@ -14,13 +13,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <AuthCard
       title="Sign in"
-      subtitle="Use your own Motogari staff account."
+      subtitle="Use your own Motogari staff account to continue to the team inbox."
+      highlights={[
+        "Every customer email has one clear owner.",
+        "Opening an email never marks it as handled.",
+        "Your own login — nobody needs the company Gmail password.",
+      ]}
       footer={<>Need an account? Ask your administrator.</>}
     >
       <LoginForm next={next} />
-      <p className="mt-4 text-xs text-muted">
-        You never need the company Gmail password here. <Link href="/forgot-password" className="underline">Reset your password</Link>.
-      </p>
     </AuthCard>
   );
 }

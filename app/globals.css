@@ -146,6 +146,13 @@ body {
 @utility card {
   @apply rounded-2xl border border-line bg-white;
 }
+/* Sign-in pages: larger Google-account-style fields. */
+@utility auth-label {
+  @apply mb-1.5 block text-sm font-medium text-ink-2;
+}
+@utility auth-input {
+  @apply block h-12 w-full rounded-lg border border-stone-300 bg-white px-4 text-base text-ink placeholder:text-stone-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none;
+}
 /* Round icon button, as in Gmail's toolbars. */
 @utility icon-btn {
   @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-hover hover:text-ink;
