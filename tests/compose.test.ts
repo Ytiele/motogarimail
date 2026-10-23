@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ adminDb: () => ({}) }));
 
 const { htmlToText, sanitizeOutgoingHtml } = await import("@/lib/mail/compose");
-const { buildMime } = await import("@/lib/mail/mime");
+const { buildMime, forwardSubject } = await import("@/lib/mail/mime");
 const { ownsStagingPath, stagingPath } = await import("@/lib/outgoing");
 
 const base = {
@@ -47,6 +47,15 @@ describe("buildMime with attachments", () => {
   it("cannot be tricked into extra headers through a filename", () => {
     const mime = buildMime({ ...base, attachments: [{ filename: 'a.txt"\r\nBcc: evil@x.com', mimeType: "text/plain", data: Buffer.from("x") }] });
     expect(mime).not.toMatch(/^Bcc:/m);
+  });
+});
+
+describe("forwardSubject", () => {
+  it("prefixes Fwd: once, replacing Re:/Fwd:", () => {
+    expect(forwardSubject("Booking")).toBe("Fwd: Booking");
+    expect(forwardSubject("Re: Booking")).toBe("Fwd: Booking");
+    expect(forwardSubject("Fwd: Booking")).toBe("Fwd: Booking");
+    expect(forwardSubject("")).toBe("Fwd: (no subject)");
   });
 });
 

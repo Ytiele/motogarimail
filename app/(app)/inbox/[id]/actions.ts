@@ -10,12 +10,13 @@ import { getActiveConnection, providerFor } from "@/lib/mail/connection";
 import { addJunkRule, findSweepable, matchingRules } from "@/lib/mail/junk";
 import { canBlockDomain, describeRule, senderDomain, type JunkRule } from "@/lib/mail/junk-rules";
 import { htmlToText, sanitizeOutgoingHtml } from "@/lib/mail/compose";
-import { buildReferences, replySubject, escapeHtml } from "@/lib/mail/mime";
+import { buildReferences, escapeHtml, forwardSubject, replySubject } from "@/lib/mail/mime";
 import { ingestMessage } from "@/lib/mail/sync";
 import type { Address, OutgoingAttachment, ParsedMessage } from "@/lib/mail/types";
 import { notify } from "@/lib/notifications";
 import { createUploadUrls, downloadStaged, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, ownsStagingPath, removeStaged } from "@/lib/outgoing";
 import { allow } from "@/lib/rate-limit";
+import { sanitizeEmailHtml } from "@/lib/sanitize";
 import { adminDb } from "@/lib/supabase/admin";
 import type { ActionResult, AppUser, Conversation, EmailRow } from "@/lib/types";
 import {
@@ -385,6 +386,9 @@ const replySchema = z.object({
   html: z.string().max(500_000),
   attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS, `Attach at most ${MAX_ATTACHMENTS} files.`),
   after: z.enum(["", "waiting", "resolved"]).optional().default(""),
+  mode: z.enum(["reply", "replyAll", "forward"]).optional().default("reply"),
+  forwardOf: uuid.optional(),
+  includeOriginalAttachments: z.boolean().optional().default(true),
 });
 
 /** Issues one-time upload URLs for files a staff member attaches to a reply (they upload straight to storage). */
@@ -428,10 +432,16 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       html: form.get("html") ?? "",
       attachments: attachmentsRaw,
       after: form.get("after") ?? "",
+      mode: form.get("mode") || "reply",
+      forwardOf: form.get("forwardOf") || undefined,
+      includeOriginalAttachments: form.get("includeOriginalAttachments") !== "false",
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     const me = await actor();
-    const { id, after } = parsed.data;
+    const { id, mode } = parsed.data;
+    const forwarding = mode === "forward";
+    // Forwarding is not a reply to the customer, so it never changes the workflow status.
+    const after = forwarding ? "" : parsed.data.after;
     const staged = parsed.data.attachments;
     if (staged.some((a) => !ownsStagingPath(me.id, a.path))) return { error: "An attachment could not be verified. Remove it and attach it again." };
     // Inline photos only count if they are still in the message (the person may have deleted one).
@@ -442,7 +452,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
     const used = staged.filter((a) => !a.inline || inlineCid[a.path]);
     const bodyHtml = sanitizeOutgoingHtml(parsed.data.html, inlineCid);
     const body = htmlToText(bodyHtml);
-    if (!body && !used.length) return { error: "Write a reply first." };
+    if (!body && !used.length && !forwarding) return { error: "Write a reply first." };
     const to = validAddresses(parsed.data.to);
     const cc = validAddresses(parsed.data.cc);
     const bcc = validAddresses(parsed.data.bcc);
@@ -472,18 +482,54 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
     const latest = (msgs as EmailRow[] | null)?.[0];
     const lastInbound = (msgs as EmailRow[] | null)?.find((m) => m.direction === "inbound");
 
-    const quoteSource = lastInbound ?? latest;
-    const quoteHeader = quoteSource
-      ? `On ${new Date(quoteSource.received_at).toUTCString()}, ${quoteSource.sender_name ?? quoteSource.sender_email} wrote:`
-      : "";
-    const quotedText = quoteSource?.body_text ? quoteSource.body_text.split("\n").map((l) => `> ${l}`).join("\n") : "";
-    const text = quotedText ? `${body}\n\n${quoteHeader}\n${quotedText}` : body;
-    const html = quotedText
-      ? `${bodyHtml}<br><div style="color:#555">${escapeHtml(quoteHeader)}</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex;color:#555">${escapeHtml(quoteSource!.body_text!).replace(/\n/g, "<br>")}</blockquote>`
-      : bodyHtml;
-
+    let text: string;
+    let html: string;
     const files: OutgoingAttachment[] = [];
     let totalBytes = 0;
+    let original: EmailRow | null = null;
+    if (forwarding) {
+      // Gmail-style forward: the note above, then the original message with its details and attachments.
+      const { data: orig } = parsed.data.forwardOf
+        ? await db.from("emails").select("*").eq("id", parsed.data.forwardOf).eq("conversation_id", id).maybeSingle()
+        : { data: latest ?? null };
+      original = (orig as EmailRow | null) ?? null;
+      if (!original) return { error: "The email to forward was not found." };
+      const from = original.sender_name ? `${original.sender_name} <${original.sender_email}>` : (original.sender_email ?? "");
+      const lines = [
+        "---------- Forwarded message ---------",
+        `From: ${from}`,
+        `Date: ${new Date(original.received_at).toUTCString()}`,
+        `Subject: ${original.subject ?? c.subject}`,
+        `To: ${original.recipient_email ?? ""}`,
+        ...(original.cc ? [`Cc: ${original.cc}`] : []),
+      ];
+      const originalHtml = original.body_html
+        ? sanitizeEmailHtml(original.body_html, {})
+        : escapeHtml(original.body_text ?? "").replace(/\n/g, "<br>");
+      text = `${body}\n\n${lines.join("\n")}\n\n${original.body_text ?? ""}`;
+      html = `${bodyHtml}<br><div style="color:#555">${lines.map(escapeHtml).join("<br>")}</div><br>${originalHtml}`;
+      if (parsed.data.includeOriginalAttachments && original.has_attachments) {
+        const { data: atts } = await db.from("email_attachments").select("filename, mime_type, part_id, content_id").eq("email_id", original.id);
+        for (const a of atts ?? []) {
+          if (!a.part_id || a.content_id) continue;
+          const file = await provider.getAttachment(original.gmail_message_id, a.part_id as string);
+          totalBytes += file.data.length;
+          if (totalBytes > MAX_ATTACHMENT_BYTES) return { error: "The original attachments are over 25 MB, so Gmail would refuse them. Untick “Include attachments” and try again." };
+          files.push({ filename: a.filename as string, mimeType: (a.mime_type as string) || file.mimeType, data: file.data });
+        }
+      }
+    } else {
+      const quoteSource = lastInbound ?? latest;
+      const quoteHeader = quoteSource
+        ? `On ${new Date(quoteSource.received_at).toUTCString()}, ${quoteSource.sender_name ?? quoteSource.sender_email} wrote:`
+        : "";
+      const quotedText = quoteSource?.body_text ? quoteSource.body_text.split("\n").map((l) => `> ${l}`).join("\n") : "";
+      text = quotedText ? `${body}\n\n${quoteHeader}\n${quotedText}` : body;
+      html = quotedText
+        ? `${bodyHtml}<br><div style="color:#555">${escapeHtml(quoteHeader)}</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex;color:#555">${escapeHtml(quoteSource!.body_text!).replace(/\n/g, "<br>")}</blockquote>`
+        : bodyHtml;
+    }
+
     for (const a of used) {
       const data = await downloadStaged(a.path);
       totalBytes += data.length;
@@ -497,7 +543,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       to,
       cc: cc ?? [],
       bcc: bcc ?? [],
-      subject: replySubject(c.subject),
+      subject: forwarding ? forwardSubject(original?.subject ?? c.subject) : replySubject(c.subject),
       text,
       html,
       inReplyTo: latest?.message_id ?? null,
@@ -533,7 +579,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
         subject: outgoing.subject,
         text,
         html,
-        snippet: (body || used.map((a) => a.name).join(", ")).slice(0, 200),
+        snippet: (body || used.map((a) => a.name).join(", ") || "Forwarded message").slice(0, 200),
         attachments: [],
       };
     }
@@ -543,7 +589,9 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
 
     const now = new Date().toISOString();
     // Replying means taking responsibility: an unowned conversation is assigned to the sender.
+    // Forwarding (e.g. to a colleague or supplier) is not a customer reply: no status, owner or response-time change.
     const r = await mutateConversation(id, (cur) => {
+      if (forwarding) return { last_activity_at: now };
       const next = statusOnReply(cur.status);
       const patch: Partial<Conversation> = { status: next, last_activity_at: now, ...workClock(cur, next) };
       if (!cur.assigned_to) patch.assigned_to = me.id;
@@ -559,7 +607,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       conversationId: id,
       emailId: ingested.emailId,
       userId: me.id,
-      metadata: { to: to.map((a) => a.email), cc: (cc ?? []).map((a) => a.email), bcc: (bcc ?? []).map((a) => a.email), gmail_message_id: sent.id },
+      metadata: { mode, to: to.map((a) => a.email), cc: (cc ?? []).map((a) => a.email), bcc: (bcc ?? []).map((a) => a.email), gmail_message_id: sent.id },
     });
     if (r.ok && r.changed) {
       if (!r.before.assigned_to && r.after.assigned_to === me.id) {
@@ -571,7 +619,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       }
     }
 
-    let message = "Reply sent from the Motogari mailbox.";
+    let message = forwarding ? "Forwarded from the Motogari mailbox." : "Reply sent from the Motogari mailbox.";
     if (after) {
       const s = await applyStatus(id, after, me);
       message = s.ok ? `${message} ${s.message ?? ""}` : `${message} (Status not changed: ${s.error})`;
@@ -581,4 +629,36 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
   } catch (e) {
     return { error: (e as Error).message };
   }
+}
+
+/** Address-book suggestions for the To/Cc/Bcc fields: people who emailed us, customers, and staff. */
+export async function searchContacts(query: string): Promise<{ name: string | null; email: string }[]> {
+  const me = await currentUser();
+  if (!me || typeof query !== "string") return [];
+  // Characters that would break the PostgREST filter are never needed to find a name or address.
+  const term = query.trim().toLowerCase().replace(/[,()*%\\"'<>]/g, " ").trim().slice(0, 60);
+  if (!term) return [];
+  const like = `*${term}*`;
+  const db = adminDb();
+  const [{ data: convs }, { data: senders }, { data: staff }] = await Promise.all([
+    db.from("conversations").select("customer_name, customer_email").or(`customer_email.ilike.${like},customer_name.ilike.${like}`).order("last_message_at", { ascending: false }).limit(25),
+    db.from("emails").select("sender_name, sender_email").eq("direction", "inbound").or(`sender_email.ilike.${like},sender_name.ilike.${like}`).order("received_at", { ascending: false }).limit(25),
+    db.from("users").select("name, email").eq("is_active", true).or(`email.ilike.${like},name.ilike.${like}`).limit(10),
+  ]);
+  const conn = await getActiveConnection();
+  const own = conn?.email_address.toLowerCase();
+  const seen = new Map<string, { name: string | null; email: string }>();
+  const add = (name: unknown, email: unknown) => {
+    const e = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!e || e === own || e.endsWith("@phone.motogari.invalid") || !isValidEmail(e)) return;
+    const n = typeof name === "string" && name.trim() ? name.trim() : null;
+    const prev = seen.get(e);
+    if (!prev || (!prev.name && n)) seen.set(e, { name: n, email: e });
+  };
+  (staff ?? []).forEach((u) => add(u.name, u.email));
+  (senders ?? []).forEach((m) => add(m.sender_name, m.sender_email));
+  (convs ?? []).forEach((c) => add(c.customer_name, c.customer_email));
+  return [...seen.values()]
+    .sort((a, b) => Number(b.email.startsWith(term) || !!b.name?.toLowerCase().startsWith(term)) - Number(a.email.startsWith(term) || !!a.name?.toLowerCase().startsWith(term)))
+    .slice(0, 8);
 }

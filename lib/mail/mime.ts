@@ -32,6 +32,11 @@ export function replySubject(subject: string | null | undefined): string {
   return /^re:/i.test(s) ? s : `Re: ${s}`;
 }
 
+export function forwardSubject(subject: string | null | undefined): string {
+  const s = (subject ?? "").trim().replace(/^(re|fwd?):\s*/i, "");
+  return `Fwd: ${s || "(no subject)"}`;
+}
+
 export function buildReferences(references: string | null, inReplyTo: string | null): string | null {
   const ids = (references ?? "").split(/\s+/).filter(Boolean);
   if (inReplyTo && !ids.includes(inReplyTo)) ids.push(inReplyTo);

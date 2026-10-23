@@ -42,7 +42,12 @@ export function describeEvent(e: EventRow, names: Map<string, string>, senders?:
     case "junk_sender_removed":
       return `${who} removed ${m.kind === "domain" ? `everyone @${m.value}` : m.value} from the junk list`;
     case "reply_sent":
-      return m.via === "gmail" ? "Reply sent directly from Gmail (outside the dashboard)" : `${who} sent a reply`;
+      if (m.via === "gmail") return "Reply sent directly from Gmail (outside the dashboard)";
+      if (m.mode === "forward") {
+        const to = (e.metadata.to as string[] | undefined)?.join(", ");
+        return `${who} forwarded the email${to ? ` to ${to}` : ""}`;
+      }
+      return m.mode === "replyAll" ? `${who} replied to all` : `${who} sent a reply`;
     case "note_added":
       return `${who} added an internal note`;
     case "email_resolved":

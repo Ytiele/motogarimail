@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { addNote, prepareAttachmentUploads, sendReply } from "@/app/(app)/inbox/[id]/actions";
+import { RecipientInput } from "@/components/email/RecipientInput";
 import { cx } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
 import { browserDb } from "@/lib/supabase/browser";
@@ -45,42 +46,72 @@ function Glyph({ d }: { d: string }) {
   );
 }
 
+type Mode = "reply" | "replyAll" | "forward" | "note";
+const isMail = (m: Mode | null): m is "reply" | "replyAll" | "forward" => m === "reply" || m === "replyAll" || m === "forward";
+
+export type ComposerTargets = {
+  /** Reply: the person who sent the latest email (their Reply-To if set). */
+  reply: string;
+  /** Reply all: the sender plus everyone else on the latest email, minus our own mailbox. */
+  replyAll: { to: string; cc: string };
+  /** Forward: the email being forwarded. */
+  forward: { emailId: string; from: string; subject: string; date: string; attachmentCount: number } | null;
+};
+
+const MODE_LABEL: Record<Mode, string> = { reply: "Reply", replyAll: "Reply all", forward: "Forward", note: "Internal note" };
+const MODE_ICON: Record<Mode, string> = {
+  reply: "M8 5L3 10l5 5M3 10h9a5 5 0 015 5v1",
+  replyAll: "M10 5l-5 5 5 5M6 5l-5 5 5 5M5 10h7a5 5 0 015 5v1",
+  forward: "M12 5l5 5-5 5M17 10H8a5 5 0 00-5 5v1",
+  note: "M4 3h9l3 3v11H4zM7 8h6M7 11h6M7 14h3",
+};
+
 export function Composer({
   id,
-  defaultTo,
-  defaultCc,
+  targets,
   greetingName,
   signature,
   canReply,
   blockedReason,
 }: {
   id: string;
-  defaultTo: string;
-  defaultCc: string;
+  targets: ComposerTargets;
   greetingName: string;
   signature: string;
   canReply: boolean;
   blockedReason?: string;
 }) {
-  const [mode, setMode] = useState<"reply" | "note">(canReply ? "reply" : "note");
-  const template = `<p>Dear ${esc(greetingName)},</p><p><br></p><p>Regards,<br>${esc(signature)}<br>Motogari</p>`;
+  // Nothing open until someone picks Reply / Reply all / Forward / Internal note, like Gmail.
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const replyTemplate = `<p>Dear ${esc(greetingName)},</p><p><br></p><p>Regards,<br>${esc(signature)}<br>Motogari</p>`;
+  const forwardTemplate = `<p><br></p><p>Regards,<br>${esc(signature)}<br>Motogari</p>`;
+  const template = mode === "forward" ? forwardTemplate : replyTemplate;
   const [replyState, replyAction, replyPending] = useActionState(sendReply, undefined);
   const [noteState, noteAction, notePending] = useActionState(addNote, undefined);
   // Kept in state (not just the DOM) so switching to "Internal note" and back never loses a half-written reply.
-  const [html, setHtml] = useState(template);
+  const [html, setHtml] = useState(replyTemplate);
   const [note, setNote] = useState("");
   const [atts, setAtts] = useState<Att[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [active, setActive] = useState<Record<string, boolean>>({});
-  const [showCopies, setShowCopies] = useState(!!defaultCc);
+  const [showCopies, setShowCopies] = useState(false);
+  const [includeOriginal, setIncludeOriginal] = useState(true);
   const editor = useRef<HTMLDivElement>(null);
   const range = useRef<Range | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
 
-  // Restore the editor content whenever the reply tab is shown.
+  const choose = (next: Mode) => {
+    // Switching between reply and forward swaps the untouched template; anything typed is kept.
+    if (isMail(next) && (html === replyTemplate || html === forwardTemplate)) setHtml(next === "forward" ? forwardTemplate : replyTemplate);
+    setShowCopies(next === "replyAll" && !!targets.replyAll.cc);
+    setMode(next);
+  };
+
+  // Restore the editor content whenever a reply / forward is opened.
   useEffect(() => {
-    if (mode !== "reply" || !editor.current) return;
+    if (!isMail(mode) || !editor.current) return;
     if (editor.current.innerHTML !== html) editor.current.innerHTML = html;
     try {
       document.execCommand("defaultParagraphSeparator", false, "p");
@@ -111,8 +142,9 @@ export function Composer({
 
   useEffect(() => {
     if (!replyState?.ok) return;
-    setHtml(template);
-    if (editor.current) editor.current.innerHTML = template;
+    setHtml(replyTemplate);
+    setMode(null);
+    setExpanded(false);
     setAtts((prev) => {
       prev.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
       return [];
@@ -120,8 +152,19 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyState?.nonce, replyState?.ok]);
   useEffect(() => {
-    if (noteState?.ok) setNote("");
+    if (!noteState?.ok) return;
+    setNote("");
+    setMode(null);
   }, [noteState?.nonce, noteState?.ok]);
+
+  const discard = () => {
+    if (isMail(mode) && html !== template && !window.confirm("Discard this draft?")) return;
+    atts.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
+    setAtts([]);
+    setHtml(replyTemplate);
+    setMode(null);
+    setExpanded(false);
+  };
 
   const sync = () => editor.current && setHtml(editor.current.innerHTML);
 
@@ -235,152 +278,69 @@ export function Composer({
   );
   const sep = (k: string) => <span key={k} className="mx-1 h-5 w-px bg-line" aria-hidden />;
 
-  return (
-    <div className={cx("overflow-hidden rounded-2xl border bg-white shadow-[0_1px_3px_rgba(60,64,67,.3)] sm:ml-14", mode === "note" ? "border-amber-300" : "border-line")}>
-      <div className="flex border-b border-line text-sm">
-        <button
-          type="button"
-          onClick={() => setMode("reply")}
-          className={cx("flex-1 border-b-[3px] px-4 py-2.5 font-medium", mode === "reply" ? "border-brand-500 bg-white text-ink" : "border-transparent bg-canvas text-muted hover:text-ink")}
-        >
-          Reply to customer
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("note")}
-          className={cx("flex-1 border-b-[3px] px-4 py-2.5 font-medium", mode === "note" ? "border-amber-400 bg-amber-50 text-amber-900" : "border-transparent bg-canvas text-muted hover:text-ink")}
-        >
-          Internal note
-        </button>
+  const actionButton = (m: Mode, disabled = false) => (
+    <button
+      key={m}
+      type="button"
+      onClick={() => choose(m)}
+      disabled={disabled}
+      title={disabled ? blockedReason : undefined}
+      className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-white px-5 text-sm font-medium text-ink-2 hover:bg-hover hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Glyph d={MODE_ICON[m]} />
+      {MODE_LABEL[m]}
+    </button>
+  );
+
+  // Gmail-style buttons under the thread until one is chosen.
+  if (!mode) {
+    const hasOthers = !!targets.replyAll.cc || targets.replyAll.to.split(",").filter((x) => x.trim()).length > 1;
+    return (
+      <div className="flex flex-wrap gap-2 sm:ml-14">
+        {actionButton("reply", !canReply)}
+        {hasOthers && actionButton("replyAll", !canReply)}
+        {targets.forward && actionButton("forward", !canReply)}
+        {actionButton("note")}
+        {!canReply && blockedReason && <p className="w-full text-xs text-muted">{blockedReason}</p>}
       </div>
+    );
+  }
 
-      {mode === "reply" ? (
-        canReply ? (
-          <form action={replyAction} className="space-y-3 p-4" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-            <input type="hidden" name="id" value={id} />
-            <input type="hidden" name="html" value={html} />
-            <input type="hidden" name="attachments" value={JSON.stringify(ready)} />
-            <div>
-              <div className="flex items-end justify-between">
-                <label className="label" htmlFor="to">To</label>
-                {!showCopies && (
-                  <button type="button" onClick={() => setShowCopies(true)} className="mb-1 text-xs font-medium text-brand-600 hover:underline">
-                    Cc Bcc
-                  </button>
-                )}
-              </div>
-              <input className="input" id="to" name="to" defaultValue={defaultTo} required />
-            </div>
-            {/* Like Gmail: Cc/Bcc stay tucked away until needed. Bcc recipients are hidden from everyone else. */}
-            <div className={cx("grid gap-3 sm:grid-cols-2", !showCopies && "hidden")}>
-              <div>
-                <label className="label" htmlFor="cc">Cc</label>
-                <input className="input" id="cc" name="cc" defaultValue={defaultCc} placeholder="Optional" />
-              </div>
-              <div>
-                <label className="label" htmlFor="bcc">Bcc</label>
-                <input className="input" id="bcc" name="bcc" placeholder="Hidden from other recipients" />
-              </div>
-            </div>
+  const header = (
+    <div className="flex items-center gap-1 border-b border-line px-3 py-1.5">
+      <span className="text-muted"><Glyph d={MODE_ICON[mode]} /></span>
+      <select
+        className="h-8 rounded-md bg-transparent pr-1 text-sm font-medium text-ink hover:bg-hover focus:outline-none"
+        value={mode}
+        onChange={(e) => choose(e.target.value as Mode)}
+        aria-label="Reply type"
+      >
+        {(["reply", "replyAll", "forward", "note"] as Mode[])
+          .filter((m) => (m === "forward" ? !!targets.forward : true) && (m === "note" || canReply))
+          .map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+      </select>
+      <span className="flex-1" />
+      {isMail(mode) && (
+        <button
+          type="button"
+          className="icon-btn h-8 w-8"
+          onClick={() => setExpanded((x) => !x)}
+          aria-label={expanded ? "Exit full screen" : "Full screen"}
+          title={expanded ? "Exit full screen" : "Full screen"}
+        >
+          <Glyph d={expanded ? "M8 3v5H3M12 3v5h5M8 17v-5H3M12 17v-5h5" : "M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"} />
+        </button>
+      )}
+      <button type="button" className="icon-btn h-8 w-8" onClick={discard} aria-label="Discard" title="Discard">
+        <Glyph d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11" />
+      </button>
+    </div>
+  );
 
-            <div className="rounded-xl border border-line focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
-              <div
-                ref={editor}
-                contentEditable
-                suppressContentEditableWarning
-                role="textbox"
-                aria-multiline="true"
-                aria-label="Reply"
-                onInput={sync}
-                onBlur={sync}
-                onPaste={onPaste}
-                className="min-h-56 px-3 py-2.5 text-sm leading-relaxed text-ink focus:outline-none [&_a]:text-brand-600 [&_a]:underline [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_blockquote]:text-muted [&_img]:my-1 [&_img]:max-w-full [&_img]:rounded [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:min-h-[1.5em] [&_ul]:list-disc [&_ul]:pl-6"
-              />
-              {/* Gmail-style formatting bar */}
-              <div className="flex flex-wrap items-center gap-0.5 border-t border-line px-2 py-1">
-                {tool("bold", "Bold (Ctrl+B)", () => exec("bold"), active.bold)}
-                {tool("italic", "Italic (Ctrl+I)", () => exec("italic"), active.italic)}
-                {tool("underline", "Underline (Ctrl+U)", () => exec("underline"), active.underline)}
-                {tool("strike", "Strikethrough", () => exec("strikeThrough"), active.strike)}
-                {sep("s1")}
-                {tool("ul", "Bulleted list", () => exec("insertUnorderedList"), active.ul)}
-                {tool("ol", "Numbered list", () => exec("insertOrderedList"), active.ol)}
-                {tool("quote", "Quote", () => exec("formatBlock", "blockquote"))}
-                {sep("s2")}
-                {tool("link", "Insert link", insertLink)}
-                {tool("clear", "Remove formatting", () => {
-                  exec("removeFormat");
-                  exec("unlink");
-                })}
-                {sep("s3")}
-                {tool("clip", "Attach files", () => fileInput.current?.click())}
-                {tool("photo", "Insert photo", () => photoInput.current?.click())}
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(e) => {
-                    upload(Array.from(e.target.files ?? []), false);
-                    e.target.value = "";
-                  }}
-                />
-                <input
-                  ref={photoInput}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  hidden
-                  onChange={(e) => {
-                    upload(Array.from(e.target.files ?? []), true);
-                    e.target.value = "";
-                  }}
-                />
-                {atts.length > 0 && <span className="tabular ml-auto pr-1 text-xs text-muted">{formatBytes(totalSize)} of 25 MB</span>}
-              </div>
-            </div>
-
-            {atts.length > 0 && (
-              <ul className="flex flex-wrap gap-2">
-                {atts.map((a) => (
-                  <li
-                    key={a.key}
-                    className={cx("flex max-w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-sm", a.status === "error" ? "border-red-200 bg-red-50" : "border-line bg-canvas")}
-                  >
-                    {a.preview ? <img src={a.preview} alt="" className="h-8 w-8 rounded object-cover" /> : <span className="text-muted"><Glyph d={ICON.clip} /></span>}
-                    <span className="max-w-44 truncate font-medium" title={a.name}>{a.name}</span>
-                    <span className="text-xs text-muted">
-                      {a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Failed") : a.inline ? "in message" : formatBytes(a.size)}
-                    </span>
-                    <button type="button" onClick={() => remove(a)} className="rounded-full px-1.5 text-muted hover:bg-hover hover:text-ink" aria-label={`Remove ${a.name}`}>
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {uploadError && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{uploadError}</p>}
-            {replyState?.error && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{replyState.error}</p>}
-            {replyState?.message && <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{replyState.message}</p>}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted">Sent through Gmail from the Motogari address, in the same thread. Notes are never included. Drop files here to attach.</p>
-              <div className="flex gap-2">
-                <select name="after" className="input w-auto" defaultValue="" aria-label="After sending">
-                  <option value="">Keep status</option>
-                  <option value="waiting">Then: waiting on customer</option>
-                  <option value="resolved">Then: resolved</option>
-                </select>
-                <button className="btn-brand shrink-0" disabled={replyPending || busy} title={busy ? "Waiting for uploads to finish" : undefined}>
-                  {replyPending ? "Sending…" : busy ? "Uploading…" : "Send"}
-                </button>
-              </div>
-            </div>
-          </form>
-        ) : (
-          <p className="p-4 text-sm text-muted">{blockedReason}</p>
-        )
-      ) : (
+  if (mode === "note") {
+    return (
+      <div className="overflow-hidden rounded-2xl border border-amber-300 bg-white shadow-[0_1px_3px_rgba(60,64,67,.3)] sm:ml-14">
+        {header}
         <form action={noteAction} className="space-y-3 bg-amber-50/40 p-4">
           <input type="hidden" name="id" value={id} />
           <textarea
@@ -389,18 +349,186 @@ export function Composer({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             required
+            autoFocus
             placeholder="Visible to Motogari staff only. Never sent to the customer."
             aria-label="Internal note"
           />
           {noteState?.error && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{noteState.error}</p>}
-          {noteState?.message && <p role="status" className="text-sm text-emerald-700">{noteState.message}</p>}
           <div className="flex justify-end">
-            <button className="btn bg-amber-500 text-white hover:bg-amber-600" disabled={notePending}>
+            <button className="btn bg-amber-500 text-[#fff] hover:bg-amber-600" disabled={notePending}>
               {notePending ? "Saving…" : "Add internal note"}
             </button>
           </div>
         </form>
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  const forwarding = mode === "forward";
+  const initialTo = mode === "reply" ? targets.reply : mode === "replyAll" ? targets.replyAll.to : "";
+  const initialCc = mode === "replyAll" ? targets.replyAll.cc : "";
+
+  return (
+    <>
+      {expanded && <div className="fixed inset-0 z-30 bg-black/30" onClick={() => setExpanded(false)} aria-hidden />}
+      <div
+        className={cx(
+          "flex flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_3px_rgba(60,64,67,.3)]",
+          // Full screen: a large Gmail-style compose window over the page.
+          expanded ? "fixed inset-2 z-40 sm:inset-6 lg:inset-x-[8%] lg:top-20 lg:bottom-6" : "sm:ml-14",
+        )}
+      >
+        {header}
+        <form action={replyAction} className={cx("flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4")} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="html" value={html} />
+          <input type="hidden" name="attachments" value={JSON.stringify(ready)} />
+          <input type="hidden" name="mode" value={mode} />
+          {forwarding && targets.forward && <input type="hidden" name="forwardOf" value={targets.forward.emailId} />}
+          {forwarding && <input type="hidden" name="includeOriginalAttachments" value={String(includeOriginal)} />}
+
+          {/* Recipient fields re-initialise when switching Reply / Reply all / Forward. */}
+          <div key={mode} className="space-y-3">
+            <RecipientInput
+              name="to"
+              label="To"
+              initial={initialTo}
+              placeholder={forwarding ? "Type a name or email address" : undefined}
+              autoFocus={forwarding}
+              action={
+                !showCopies ? (
+                  <button type="button" onClick={() => setShowCopies(true)} className="mb-1 text-xs font-medium text-brand-600 hover:underline">
+                    Cc Bcc
+                  </button>
+                ) : undefined
+              }
+            />
+            {/* Like Gmail: Cc/Bcc stay tucked away until needed. Bcc recipients are hidden from everyone else. */}
+            <div className={cx("grid gap-3 sm:grid-cols-2", !showCopies && "hidden")}>
+              <RecipientInput name="cc" label="Cc" initial={initialCc} />
+              <RecipientInput name="bcc" label="Bcc" placeholder="Hidden from other recipients" />
+            </div>
+          </div>
+
+          <div className={cx("flex flex-col rounded-xl border border-line focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100", expanded && "min-h-0 flex-1")}>
+            <div
+              ref={editor}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              aria-multiline="true"
+              aria-label={forwarding ? "Message to add before the forwarded email" : "Reply"}
+              onInput={sync}
+              onBlur={sync}
+              onPaste={onPaste}
+              className={cx(
+                "overflow-y-auto px-3 py-2.5 text-sm leading-relaxed text-ink focus:outline-none [&_a]:text-brand-600 [&_a]:underline [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_blockquote]:text-muted [&_img]:my-1 [&_img]:max-w-full [&_img]:rounded [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:min-h-[1.5em] [&_ul]:list-disc [&_ul]:pl-6",
+                expanded ? "min-h-0 flex-1" : "max-h-[60vh] min-h-48",
+              )}
+            />
+            {forwarding && targets.forward && (
+              <div className="mx-3 mb-2 rounded-lg bg-canvas px-3 py-2 text-xs text-muted">
+                <div className="font-medium text-ink-2">---------- Forwarded message ---------</div>
+                <div>From: {targets.forward.from}</div>
+                <div>Date: {targets.forward.date}</div>
+                <div>Subject: {targets.forward.subject}</div>
+                <div className="mt-1 italic">The original message is added below your text when sent.</div>
+                {targets.forward.attachmentCount > 0 && (
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 text-ink-2 not-italic">
+                    <input type="checkbox" className="h-4 w-4 accent-brand-500" checked={includeOriginal} onChange={(e) => setIncludeOriginal(e.target.checked)} />
+                    Include the original {targets.forward.attachmentCount === 1 ? "attachment" : `${targets.forward.attachmentCount} attachments`}
+                  </label>
+                )}
+              </div>
+            )}
+            {/* Gmail-style formatting bar */}
+            <div className="flex flex-wrap items-center gap-0.5 border-t border-line px-2 py-1">
+              {tool("bold", "Bold (Ctrl+B)", () => exec("bold"), active.bold)}
+              {tool("italic", "Italic (Ctrl+I)", () => exec("italic"), active.italic)}
+              {tool("underline", "Underline (Ctrl+U)", () => exec("underline"), active.underline)}
+              {tool("strike", "Strikethrough", () => exec("strikeThrough"), active.strike)}
+              {sep("s1")}
+              {tool("ul", "Bulleted list", () => exec("insertUnorderedList"), active.ul)}
+              {tool("ol", "Numbered list", () => exec("insertOrderedList"), active.ol)}
+              {tool("quote", "Quote", () => exec("formatBlock", "blockquote"))}
+              {sep("s2")}
+              {tool("link", "Insert link", insertLink)}
+              {tool("clear", "Remove formatting", () => {
+                exec("removeFormat");
+                exec("unlink");
+              })}
+              {sep("s3")}
+              {tool("clip", "Attach files", () => fileInput.current?.click())}
+              {tool("photo", "Insert photo", () => photoInput.current?.click())}
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  upload(Array.from(e.target.files ?? []), false);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  upload(Array.from(e.target.files ?? []), true);
+                  e.target.value = "";
+                }}
+              />
+              {atts.length > 0 && <span className="tabular ml-auto pr-1 text-xs text-muted">{formatBytes(totalSize)} of 25 MB</span>}
+            </div>
+          </div>
+
+          {atts.length > 0 && (
+            <ul className="flex flex-wrap gap-2">
+              {atts.map((a) => (
+                <li
+                  key={a.key}
+                  className={cx("flex max-w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-sm", a.status === "error" ? "border-red-200 bg-red-50" : "border-line bg-canvas")}
+                >
+                  {a.preview ? <img src={a.preview} alt="" className="h-8 w-8 rounded object-cover" /> : <span className="text-muted"><Glyph d={ICON.clip} /></span>}
+                  <span className="max-w-44 truncate font-medium" title={a.name}>{a.name}</span>
+                  <span className="text-xs text-muted">
+                    {a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Failed") : a.inline ? "in message" : formatBytes(a.size)}
+                  </span>
+                  <button type="button" onClick={() => remove(a)} className="rounded-full px-1.5 text-muted hover:bg-hover hover:text-ink" aria-label={`Remove ${a.name}`}>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {uploadError && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{uploadError}</p>}
+          {replyState?.error && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{replyState.error}</p>}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted">
+              {forwarding
+                ? "Forwarding does not change the status or owner of this conversation."
+                : "Sent through Gmail from the Motogari address, in the same thread. Notes are never included."}{" "}
+              Drop files here to attach.
+            </p>
+            <div className="flex gap-2">
+              {!forwarding && (
+                <select name="after" className="input w-auto" defaultValue="" aria-label="After sending">
+                  <option value="">Keep status</option>
+                  <option value="waiting">Then: waiting on customer</option>
+                  <option value="resolved">Then: resolved</option>
+                </select>
+              )}
+              <button className="btn-brand shrink-0 px-6" disabled={replyPending || busy} title={busy ? "Waiting for uploads to finish" : undefined}>
+                {replyPending ? "Sending…" : busy ? "Uploading…" : "Send"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </>
   );
 }

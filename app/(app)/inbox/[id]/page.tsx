@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/activity";
-import { Composer } from "@/components/email/Composer";
+import { Composer, type ComposerTargets } from "@/components/email/Composer";
 import { JunkControl, MarkOpened, OwnershipControl, WorkflowControls } from "@/components/email/Controls";
 import { EmailFrame } from "@/components/email/EmailFrame";
 import { ThreadView } from "@/components/email/ThreadView";
@@ -9,6 +9,7 @@ import { Assignee, Avatar, cx, OverdueBadge, PriorityBadge, StatusBadge } from "
 import { requireUser } from "@/lib/auth";
 import { formatBytes, formatDateTime, formatRelative, formatShort } from "@/lib/format";
 import { formatAddress, parseAddressList } from "@/lib/mail/address";
+import { getPublicConnection } from "@/lib/mail/connection";
 import { sanitizeEmailHtml } from "@/lib/sanitize";
 import type { Attachment, Category, Conversation, EmailRow, EventRow, NoteRow } from "@/lib/types";
 import { isOverdue } from "@/lib/workflow";
@@ -53,7 +54,36 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   const viewers = [...new Set(evts.filter((e) => e.event_type === "email_opened" && e.user_id).map((e) => e.user_id!))];
   const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound");
   const firstInbound = messages.find((m) => m.direction === "inbound");
-  const replyTarget = lastInbound?.reply_to || (lastInbound ? formatAddress({ name: lastInbound.sender_name, email: lastInbound.sender_email ?? "" }) : c.customer_email ?? "");
+  // Who Reply / Reply all / Forward start with, the way Gmail works it out.
+  const conn = await getPublicConnection();
+  const own = conn?.email_address.toLowerCase() ?? "";
+  const sender = lastInbound
+    ? lastInbound.reply_to
+      ? parseAddressList(lastInbound.reply_to)
+      : [{ name: lastInbound.sender_name, email: (lastInbound.sender_email ?? "").toLowerCase() }]
+    : c.customer_email
+      ? [{ name: c.customer_name, email: c.customer_email }]
+      : [];
+  const uniq = (list: { name: string | null; email: string }[], skip: string[] = []) => {
+    const seen = new Set([own, ...skip]);
+    return list.filter((a) => a.email && !seen.has(a.email) && !!seen.add(a.email));
+  };
+  const allTo = uniq([...sender, ...parseAddressList(lastInbound?.recipient_email)]);
+  const allCc = uniq(parseAddressList(lastInbound?.cc), allTo.map((a) => a.email));
+  const forwardSource = messages[messages.length - 1];
+  const targets: ComposerTargets = {
+    reply: sender.map(formatAddress).join(", "),
+    replyAll: { to: allTo.map(formatAddress).join(", "), cc: allCc.map(formatAddress).join(", ") },
+    forward: forwardSource
+      ? {
+          emailId: forwardSource.id,
+          from: forwardSource.sender_name ? `${forwardSource.sender_name} <${forwardSource.sender_email}>` : (forwardSource.sender_email ?? ""),
+          subject: forwardSource.subject ?? c.subject,
+          date: formatDateTime(forwardSource.received_at),
+          attachmentCount: attachments.filter((a) => a.email_id === forwardSource.id && !a.content_id).length,
+        }
+      : null,
+  };
 
   type Item = { kind: "email"; at: string; email: EmailRow } | { kind: "note"; at: string; note: NoteRow };
   const items: Item[] = [
@@ -177,8 +207,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
           />
           <Composer
             id={c.id}
-            defaultTo={replyTarget}
-            defaultCc=""
+            targets={targets}
             greetingName={(lastInbound?.sender_name ?? c.customer_name ?? "Customer").split(/\s+/)[0]}
             signature={me.name}
             canReply={canReply}
