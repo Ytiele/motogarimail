@@ -33,6 +33,9 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   const { data: convs } = convIds.length ? await supabase.from("conversations").select("id, subject").in("id", convIds) : { data: [] };
   const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
   const subjects = new Map((convs ?? []).map((c) => [c.id as string, c.subject as string]));
+  const emailIds = [...new Set(evts.filter((e) => e.email_id && ["email_received", "customer_replied"].includes(e.event_type)).map((e) => e.email_id!))];
+  const { data: mails } = emailIds.length ? await supabase.from("emails").select("id, sender_name, sender_email").in("id", emailIds) : { data: [] };
+  const senders = new Map((mails ?? []).map((m) => [m.id as string, { name: m.sender_name as string | null, email: m.sender_email as string | null }]));
 
   const href = (o: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
@@ -67,7 +70,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
         <EmptyState title="No activity yet" />
       ) : (
         <div className="card p-5">
-          <ActivityList events={evts} names={names} subjects={subjects} />
+          <ActivityList events={evts} names={names} subjects={subjects} senders={senders} />
           <div className="mt-6 flex gap-2">
             {page > 1 && <Link className="btn-secondary" href={href({ page: String(page - 1) })}>Newer</Link>}
             {evts.length === 100 && <Link className="btn-secondary" href={href({ page: String(page + 1) })}>Older</Link>}

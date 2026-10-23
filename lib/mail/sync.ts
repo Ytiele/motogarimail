@@ -166,12 +166,14 @@ export async function ingestMessage(msg: ParsedMessage, ctx: IngestContext): Pro
         type: "email_received",
         conversationId: conv.id,
         emailId,
-        metadata: ctx.quiet ? { historical: true } : { from: msg.from?.email, auto_filed: conv.filed_reason ?? undefined },
+        metadata: ctx.quiet
+          ? { historical: true, from: msg.from?.email, from_name: msg.from?.name ?? undefined }
+          : { from: msg.from?.email, from_name: msg.from?.name ?? undefined, auto_filed: conv.filed_reason ?? undefined },
       });
     } else if (!ctx.quiet && (after.status === "no_action" || after.status === "junk")) {
-      await logEvent({ type: "email_received", conversationId: conv.id, emailId, metadata: { from: msg.from?.email, auto_filed: after.filed_reason ?? "Filed as no action needed" } });
+      await logEvent({ type: "email_received", conversationId: conv.id, emailId, metadata: { from: msg.from?.email, from_name: msg.from?.name ?? undefined, auto_filed: after.filed_reason ?? "Filed as no action needed" } });
     } else if (!ctx.quiet) {
-      await logEvent({ type: "customer_replied", conversationId: conv.id, emailId, metadata: { from: msg.from?.email } });
+      await logEvent({ type: "customer_replied", conversationId: conv.id, emailId, metadata: { from: msg.from?.email, from_name: msg.from?.name ?? undefined } });
       if (reopened) {
         await logEvent({ type: "conversation_reopened", conversationId: conv.id, emailId, metadata: { previous_status: result.before.status } });
       }

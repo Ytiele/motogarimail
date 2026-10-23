@@ -4,15 +4,24 @@ import { formatDateTime } from "@/lib/format";
 import type { EventRow } from "@/lib/types";
 import { STATUS_LABEL, type Status, PRIORITY_LABEL, type Priority } from "@/lib/workflow";
 
-export function describeEvent(e: EventRow, names: Map<string, string>): string {
+export type Senders = Map<string, { name: string | null; email: string | null }>;
+
+export function describeEvent(e: EventRow, names: Map<string, string>, senders?: Senders): string {
   const who = e.user_id ? (names.get(e.user_id) ?? "A former user") : null;
   const m = e.metadata as Record<string, string | boolean | null | undefined>;
+  // Who actually wrote in: the name on the email, else its address. Older events only stored the
+  // address, so the stored email (if loaded) fills in the name.
+  const stored = e.email_id ? senders?.get(e.email_id) : undefined;
+  const fromName = (m.from_name as string | undefined) || stored?.name || null;
+  const fromEmail = (m.from as string | undefined) || stored?.email || null;
+  const sender = fromName && fromEmail && fromName !== fromEmail ? `${fromName} (${fromEmail})` : (fromName ?? fromEmail);
   switch (e.event_type) {
     case "email_received":
-      if (m.historical) return "Email imported from Gmail history";
-      return m.auto_filed ? `Email received — filed as no action needed (${m.auto_filed})` : "Email received";
+      if (m.historical) return sender ? `Email from ${sender} imported from Gmail history` : "Email imported from Gmail history";
+      if (m.auto_filed) return `Email received${sender ? ` from ${sender}` : ""} — filed as no action needed (${m.auto_filed})`;
+      return sender ? `Email received from ${sender}` : "Email received";
     case "customer_replied":
-      return "Customer replied";
+      return sender ? `${sender} replied` : "Customer replied";
     case "conversation_reopened":
       return `Reopened automatically — customer replied after it was ${STATUS_LABEL[m.previous_status as Status] ?? m.previous_status}`;
     case "email_opened":
@@ -63,17 +72,19 @@ export function ActivityList({
   events,
   names,
   subjects,
+  senders,
 }: {
   events: EventRow[];
   names: Map<string, string>;
   subjects?: Map<string, string>;
+  senders?: Senders;
 }) {
   return (
     <ol className="relative space-y-3 border-l border-line pl-4">
       {events.map((e) => (
         <li key={e.id} className="relative">
           <span className={`absolute top-1.5 -left-[21px] h-2.5 w-2.5 rounded-full ring-2 ring-white ${DOT[e.event_type] ?? "bg-stone-400"}`} />
-          <div className="text-sm">{describeEvent(e, names)}</div>
+          <div className="text-sm">{describeEvent(e, names, senders)}</div>
           {subjects && e.conversation_id && (
             <Link href={`/inbox/${e.conversation_id}`} className="block truncate text-xs text-brand-700 hover:underline">
               {subjects.get(e.conversation_id) ?? "Conversation"}

@@ -211,7 +211,11 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
           </div>
           <div className="rounded-2xl bg-canvas p-4">
             <div className="mb-3 text-sm font-medium text-ink">Activity</div>
-            {evts.length ? <ActivityList events={evts} names={names} /> : <p className="text-sm text-muted">No activity yet.</p>}
+            {evts.length ? (
+              <ActivityList events={evts} names={names} senders={new Map(messages.map((m) => [m.id, { name: m.sender_name, email: m.sender_email }]))} />
+            ) : (
+              <p className="text-sm text-muted">No activity yet.</p>
+            )}
           </div>
         </aside>
       </div>
