@@ -49,7 +49,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const [{ data: rows, error }, { data: counts }, { data: staff }, { data: categories }] = await Promise.all([
     supabase.rpc("list_conversations", { p: filter }),
     supabase.rpc("inbox_counts"),
-    supabase.from("users").select("id, name").eq("is_active", true).order("name"),
+    supabase.from("users").select("id, name").eq("is_active", true).neq("role", "chat").order("name"),
     supabase.from("categories").select("*").eq("is_active", true).order("sort_order"),
   ]);
   const list = (rows as InboxRow[]) ?? [];

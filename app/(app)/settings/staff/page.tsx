@@ -47,6 +47,7 @@ export default async function StaffPage() {
                   <select className="input" name="role" defaultValue={u.role}>
                     <option value="staff">Staff</option>
                     <option value="admin">Admin / CEO</option>
+                    <option value="chat">Chat only</option>
                   </select>
                 </div>
                 <div className="flex-1"><label className="label">Department</label><input className="input" name="department" defaultValue={u.department ?? ""} /></div>

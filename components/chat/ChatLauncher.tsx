@@ -62,8 +62,16 @@ function GroupAvatar({ size = 40 }: { size?: number }) {
 }
 
 /** Top-bar chat button + right-hand team chat panel: direct messages and group chats between staff. */
-export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "admin" | "staff" } }) {
-  const [open, setOpen] = useState(false);
+export function ChatLauncher({
+  me,
+  variant = "panel",
+}: {
+  me: { id: string; name: string; role?: "admin" | "staff" | "chat" };
+  /** "panel": top-bar button + slide-in panel. "page": full-screen chat (two panes on wide screens). */
+  variant?: "panel" | "page";
+}) {
+  const isPage = variant === "page";
+  const [open, setOpen] = useState(isPage);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -236,10 +244,10 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
   }, [sel]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !isPage && setOpen(false);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [isPage]);
 
   const resetComposer = () => {
     if (pending?.preview) URL.revokeObjectURL(pending.preview);
@@ -412,9 +420,11 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
       )}
       <div className="min-w-0 flex-1 truncate text-base text-ink">{label}</div>
       {extra}
-      <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
-        <Svg d={CLOSE} size={18} />
-      </button>
+      {!isPage && (
+        <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
+          <Svg d={CLOSE} size={18} />
+        </button>
+      )}
     </div>
   );
 
@@ -452,44 +462,9 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
     );
   };
 
-  return (
+  const renderView = (v: View) => (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={cx("icon-btn relative", open && "bg-brand-100 text-ink")}
-        aria-label={unreadTotal ? `Team chat, ${unreadTotal} unread` : "Team chat"}
-        aria-expanded={open}
-        title="Team chat"
-      >
-        <Svg d={CHAT} />
-        {unreadTotal > 0 && (
-          <span className="tabular absolute top-1 right-1 min-w-4 rounded-full bg-brand-500 px-1 text-center text-[10px] leading-4 font-bold text-[#fff]">
-            {unreadTotal > 99 ? "99+" : unreadTotal}
-          </span>
-        )}
-      </button>
-
-      {toast && !(open && view === "thread" && sel?.kind === toast.sel.kind && sel.id === toast.sel.id) && (
-        <button
-          type="button"
-          onClick={() => openThread(toast.sel)}
-          className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-3 rounded-2xl bg-white p-3 text-left shadow-[0_4px_16px_rgba(60,64,67,.3)] ring-1 ring-line"
-        >
-          {toast.sel.kind === "room" ? <GroupAvatar size={32} /> : <Avatar name={peerName(toast.sel.id)} size={32} />}
-          <span className="min-w-0">
-            <span className="block text-sm font-medium text-ink">{toast.sel.kind === "room" ? (room(toast.sel.id)?.name ?? "Group") : peerName(toast.sel.id)}</span>
-            <span className="block truncate text-sm text-muted">{toast.body}</span>
-          </span>
-        </button>
-      )}
-
-      {open && (
-        <aside
-          className="fixed top-16 right-0 bottom-0 z-30 flex w-full flex-col bg-white shadow-[0_0_24px_rgba(60,64,67,.25)] sm:w-[380px] lg:bottom-4 lg:rounded-l-2xl"
-          aria-label="Team chat"
-        >
-          {view === "list" && (
+          {v === "list" && (
             <>
               <div className="flex items-center justify-between px-4 pt-3 pb-1">
                 <h2 className="text-lg text-ink">Team chat</h2>
@@ -497,9 +472,16 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
                   <button type="button" onClick={() => startPicking("newGroup")} className="flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-brand-600 hover:bg-hover">
                     <Svg d={GROUP} size={16} /> New group
                   </button>
-                  <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
-                    <Svg d={CLOSE} size={18} />
-                  </button>
+                  {!isPage && (
+                    <a href="/chat" className="icon-btn h-9 w-9" aria-label="Open chat full screen" title="Open chat full screen">
+                      <Svg d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5" size={18} />
+                    </a>
+                  )}
+                  {!isPage && (
+                    <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
+                      <Svg d={CLOSE} size={18} />
+                    </button>
+                  )}
                 </div>
               </div>
               {searchBox("Search people and groups")}
@@ -535,7 +517,7 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
             </>
           )}
 
-          {view === "newGroup" && (
+          {v === "newGroup" && (
             <>
               {header("New group", () => setView("list"))}
               <div className="px-4 pt-3">
@@ -553,7 +535,7 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
             </>
           )}
 
-          {view === "groupInfo" && sel?.kind === "room" && (
+          {v === "groupInfo" && sel?.kind === "room" && (
             <>
               {header("Group info", () => setView("thread"))}
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -591,7 +573,7 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
             </>
           )}
 
-          {view === "forward" && forwardMsg && (
+          {v === "forward" && forwardMsg && (
             <>
               {header("Forward to…", () => setView("thread"))}
               <div className="mx-4 mt-3 rounded-xl border-l-2 border-brand-500 bg-canvas px-3 py-2 text-xs text-muted">
@@ -633,10 +615,10 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
             </>
           )}
 
-          {view === "thread" && sel && (
+          {v === "thread" && sel && (
             <>
               <div className="flex items-center gap-2 border-b border-line px-2 py-2">
-                <button type="button" className="icon-btn h-9 w-9" onClick={() => setView("list")} aria-label="Back to chats">
+                <button type="button" className={cx("icon-btn h-9 w-9", isPage && "lg:hidden")} onClick={() => setView("list")} aria-label="Back to chats">
                   <Svg d={BACK} size={18} />
                 </button>
                 {sel.kind === "room" ? <GroupAvatar size={32} /> : <Avatar name={title} size={32} />}
@@ -657,9 +639,11 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
                     <Svg d={TRASH} size={18} />
                   </button>
                 )}
-                <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
-                  <Svg d={CLOSE} size={18} />
-                </button>
+                {!isPage && (
+                  <button type="button" className="icon-btn h-9 w-9" onClick={() => setOpen(false)} aria-label="Close chat">
+                    <Svg d={CLOSE} size={18} />
+                  </button>
+                )}
               </div>
 
               <div ref={scroller} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
@@ -837,6 +821,69 @@ export function ChatLauncher({ me }: { me: { id: string; name: string; role?: "a
               </div>
             </>
           )}
+    </>
+  );
+
+  const toastEl = toast && !(open && view === "thread" && sel?.kind === toast.sel.kind && sel.id === toast.sel.id) && (
+    <button
+      type="button"
+      onClick={() => openThread(toast.sel)}
+      className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-3 rounded-2xl bg-white p-3 text-left shadow-[0_4px_16px_rgba(60,64,67,.3)] ring-1 ring-line"
+    >
+      {toast.sel.kind === "room" ? <GroupAvatar size={32} /> : <Avatar name={peerName(toast.sel.id)} size={32} />}
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-ink">{toast.sel.kind === "room" ? (room(toast.sel.id)?.name ?? "Group") : peerName(toast.sel.id)}</span>
+        <span className="block truncate text-sm text-muted">{toast.body}</span>
+      </span>
+    </button>
+  );
+
+  // Full-screen chat: people & groups on the left, the open chat on the right (one pane on phones).
+  if (isPage) {
+    return (
+      <div className="grid h-full min-h-0 overflow-hidden bg-white lg:grid-cols-[380px_minmax(0,1fr)]">
+        <div className={cx("flex min-h-0 flex-col border-line lg:border-r", view !== "list" && "hidden lg:flex")}>{renderView("list")}</div>
+        <div className={cx("flex min-h-0 flex-col", view === "list" && "hidden lg:flex")}>
+          {view === "list" ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted">
+              <Svg d={CHAT} size={48} />
+              <p className="text-sm">Pick a person or group to start chatting.</p>
+            </div>
+          ) : (
+            renderView(view)
+          )}
+        </div>
+        {toastEl}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cx("icon-btn relative", open && "bg-brand-100 text-ink")}
+        aria-label={unreadTotal ? `Team chat, ${unreadTotal} unread` : "Team chat"}
+        aria-expanded={open}
+        title="Team chat"
+      >
+        <Svg d={CHAT} />
+        {unreadTotal > 0 && (
+          <span className="tabular absolute top-1 right-1 min-w-4 rounded-full bg-brand-500 px-1 text-center text-[10px] leading-4 font-bold text-[#fff]">
+            {unreadTotal > 99 ? "99+" : unreadTotal}
+          </span>
+        )}
+      </button>
+
+      {toastEl}
+
+      {open && (
+        <aside
+          className="fixed top-16 right-0 bottom-0 z-30 flex w-full flex-col bg-white shadow-[0_0_24px_rgba(60,64,67,.25)] sm:w-[380px] lg:bottom-4 lg:rounded-l-2xl"
+          aria-label="Team chat"
+        >
+          {renderView(view)}
         </aside>
       )}
     </>

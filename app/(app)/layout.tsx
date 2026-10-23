@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { RealtimeBridge } from "@/components/shell/RealtimeBridge";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, supabase } = await requireUser();
+  if (user.role === "chat") redirect("/chat");
   const [{ data: counts }, { count: unread }, conn] = await Promise.all([
     supabase.rpc("inbox_counts"),
     supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).is("read_at", null),

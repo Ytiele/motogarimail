@@ -39,6 +39,7 @@ const uuid = z.string().uuid();
 async function actor(): Promise<AppUser> {
   const me = await currentUser();
   if (!me) throw new Error("Your session has expired. Please sign in again.");
+  if (me.role === "chat") throw new Error("Your account only has access to team chat.");
   return me;
 }
 
@@ -75,7 +76,7 @@ async function recordAssignment(conversationId: string, from: string | null, to:
 export async function markOpened(id: string): Promise<void> {
   if (!uuid.safeParse(id).success) return;
   const me = await currentUser();
-  if (!me || (await viewError(me, id))) return;
+  if (!me || me.role === "chat" || (await viewError(me, id))) return;
   const since = new Date(Date.now() - 30 * 60_000).toISOString();
   const { data } = await adminDb()
     .from("email_events")
@@ -130,8 +131,9 @@ export async function assign(id: string, assigneeId: string | null): Promise<Act
     const me = await actor();
     let target: { id: string; name: string } | null = null;
     if (assigneeId) {
-      const { data } = await adminDb().from("users").select("id, name, is_active").eq("id", assigneeId).maybeSingle();
+      const { data } = await adminDb().from("users").select("id, name, is_active, role").eq("id", assigneeId).maybeSingle();
       if (!data?.is_active) return { ok: false, error: "That staff member is not active." };
+      if (data.role === "chat") return { ok: false, error: "Chat-only accounts cannot own emails." };
       target = { id: data.id, name: data.name };
     }
 
@@ -634,7 +636,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
 /** Address-book suggestions for the To/Cc/Bcc fields: people who emailed us, customers, and staff. */
 export async function searchContacts(query: string): Promise<{ name: string | null; email: string }[]> {
   const me = await currentUser();
-  if (!me || typeof query !== "string") return [];
+  if (!me || me.role === "chat" || typeof query !== "string") return [];
   // Characters that would break the PostgREST filter are never needed to find a name or address.
   const term = query.trim().toLowerCase().replace(/[,()*%\\"'<>]/g, " ").trim().slice(0, 60);
   if (!term) return [];

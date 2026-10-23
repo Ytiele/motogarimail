@@ -6,7 +6,7 @@ import { logout } from "@/app/(auth)/actions";
 import { Avatar } from "@/components/ui";
 
 /** Gmail-style account menu behind the avatar in the top bar. */
-export function AccountMenu({ name, contact, roleLabel }: { name: string; contact: string; roleLabel: string }) {
+export function AccountMenu({ name, contact, roleLabel, accountHref = "/account" }: { name: string; contact: string; roleLabel: string; accountHref?: string }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
@@ -44,7 +44,7 @@ export function AccountMenu({ name, contact, roleLabel }: { name: string; contac
             <div className="mt-1 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-ink-2">{roleLabel}</div>
           </div>
           <div className="mt-4 space-y-2">
-            <Link href="/account" role="menuitem" onClick={() => setOpen(false)} className="btn-secondary w-full">
+            <Link href={accountHref} role="menuitem" onClick={() => setOpen(false)} className="btn-secondary w-full">
               My account &amp; password
             </Link>
             <form action={logout}>

@@ -8,7 +8,7 @@ export const metadata = { title: "Team" };
 export default async function TeamPage() {
   const { user: me, supabase } = await requireAdmin();
   const [{ data: users }, { data: open }] = await Promise.all([
-    supabase.from("users").select("id, name, email, role, department, last_login_at").eq("is_active", true).order("name"),
+    supabase.from("users").select("id, name, email, role, department, last_login_at").eq("is_active", true).neq("role", "chat").order("name"),
     supabase.from("conversations").select("assigned_to, status, priority, sla_due_at").in("status", ["assigned", "in_progress", "waiting", "new"]).not("assigned_to", "is", null),
   ]);
 

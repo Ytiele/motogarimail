@@ -39,6 +39,7 @@ export function AddStaffFields() {
           <select id="r" className="input" name="role" defaultValue="staff">
             <option value="staff">Staff</option>
             <option value="admin">Admin / CEO</option>
+            <option value="chat">Chat only (no email access)</option>
           </select>
         </div>
         <div><label className="label" htmlFor="d">Department</label><input id="d" className="input" name="department" placeholder="e.g. Bookings" /></div>

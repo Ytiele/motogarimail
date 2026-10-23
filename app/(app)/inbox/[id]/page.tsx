@@ -29,7 +29,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
     supabase.from("emails").select("*").eq("conversation_id", id).order("received_at"),
     supabase.from("email_notes").select("*").eq("conversation_id", id).order("created_at"),
     supabase.from("email_events").select("*").eq("conversation_id", id).order("created_at", { ascending: false }).limit(200),
-    supabase.from("users").select("id, name, is_active").order("name"),
+    supabase.from("users").select("id, name, is_active, role").order("name"),
     supabase.from("categories").select("*").eq("is_active", true).order("sort_order"),
   ]);
   const messages = (emails as EmailRow[]) ?? [];
@@ -40,7 +40,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   const attachments = (atts as (Attachment & { content_id: string | null })[]) ?? [];
 
   const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
-  const activeStaff = (users ?? []).filter((u) => u.is_active).map((u) => ({ id: u.id as string, name: u.name as string }));
+  const activeStaff = (users ?? []).filter((u) => u.is_active && u.role !== "chat").map((u) => ({ id: u.id as string, name: u.name as string }));
   const evts = (events as EventRow[]) ?? [];
 
   const isAdmin = me.role === "admin";

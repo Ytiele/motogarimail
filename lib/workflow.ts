@@ -4,7 +4,8 @@ export type Status = (typeof STATUSES)[number];
 export const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
-export type Role = "admin" | "staff";
+/** "chat" accounts only use team chat and can never reach email. */
+export type Role = "admin" | "staff" | "chat";
 
 export const OPEN_STATUSES: readonly Status[] = ["new", "assigned", "in_progress", "waiting"];
 export const SLA_ACTIVE_STATUSES: readonly Status[] = ["new", "assigned", "in_progress"];

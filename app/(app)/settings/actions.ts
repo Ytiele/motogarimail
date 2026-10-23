@@ -39,7 +39,7 @@ function tempPassword() {
 const staffSchema = z.object({
   name: z.string().trim().min(2, "Enter a name").max(100),
   email: z.string().trim().toLowerCase().email("Enter a valid email").max(254),
-  role: z.enum(["admin", "staff"]),
+  role: z.enum(["admin", "staff", "chat"]),
   department: z.string().trim().max(100).optional(),
 });
 
@@ -60,7 +60,7 @@ async function createPhoneStaff(me: AppUser, form: FormData): Promise<FormResult
 
   const email = phoneLoginEmail(phone);
   // Random password nobody knows; the staff member replaces it through the set-up link.
-  const { data, error } = await db.auth.admin.createUser({ email, password: randomBytes(32).toString("base64url"), email_confirm: true, user_metadata: { name, phone } });
+  const { data, error } = await db.auth.admin.createUser({ email, password: randomBytes(32).toString("base64url"), email_confirm: true, user_metadata: { name, phone }, app_metadata: { role } });
   if (error || !data.user) return { error: error?.message.includes("already") ? "A staff member with that phone number already exists." : (error?.message ?? "Could not create the account.") };
   const { error: pErr } = await db.from("users").insert({ id: data.user.id, name, email, phone, role, department: department || null });
   if (pErr) {
@@ -88,7 +88,7 @@ export async function createStaff(_: FormResult, form: FormData): Promise<FormRe
     const { name, email, role, department } = parsed.data;
     const db = adminDb();
     const password = tempPassword();
-    const { data, error } = await db.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name } });
+    const { data, error } = await db.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name }, app_metadata: { role } });
     if (error || !data.user) return { error: error?.message.includes("already") ? "An account with that email already exists." : (error?.message ?? "Could not create the account.") };
     const { error: pErr } = await db.from("users").insert({ id: data.user.id, name, email, role, department: department || null });
     if (pErr) {
@@ -110,7 +110,17 @@ export async function updateStaff(_: FormResult, form: FormData): Promise<FormRe
     const parsed = staffSchema.omit({ email: true }).safeParse(Object.fromEntries(form));
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     if (id === me.id && parsed.data.role !== "admin") return { error: "You cannot remove your own admin role." };
+    const { error: authErr } = await adminDb().auth.admin.updateUserById(id, { app_metadata: { role: parsed.data.role } });
+    if (authErr) return { error: "Could not update the account." };
     await adminDb().from("users").update({ name: parsed.data.name, role: parsed.data.role, department: parsed.data.department || null }).eq("id", id);
+    if (parsed.data.role === "chat") {
+      // A chat-only account cannot own emails: hand its open conversations back to the team.
+      await adminDb()
+        .from("conversations")
+        .update({ assigned_to: null, status: "new" })
+        .eq("assigned_to", id)
+        .in("status", ["assigned", "in_progress", "waiting"]);
+    }
     await logEvent({ type: "staff_updated", userId: me.id, metadata: { staff_id: id, role: parsed.data.role } });
     revalidatePath("/settings/staff");
     return { ok: true, message: "Saved." };
