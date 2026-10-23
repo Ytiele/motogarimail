@@ -4,9 +4,10 @@ import { ActivityList } from "@/components/activity";
 import { Composer } from "@/components/email/Composer";
 import { JunkControl, MarkOpened, OwnershipControl, WorkflowControls } from "@/components/email/Controls";
 import { EmailFrame } from "@/components/email/EmailFrame";
+import { ThreadView } from "@/components/email/ThreadView";
 import { Assignee, Avatar, cx, OverdueBadge, PriorityBadge, StatusBadge } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { formatBytes, formatDateTime, formatRelative } from "@/lib/format";
+import { formatBytes, formatDateTime, formatRelative, formatShort } from "@/lib/format";
 import { formatAddress, parseAddressList } from "@/lib/mail/address";
 import { sanitizeEmailHtml } from "@/lib/sanitize";
 import type { Attachment, Category, Conversation, EmailRow, EventRow, NoteRow } from "@/lib/types";
@@ -139,24 +140,41 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         {/* Conversation */}
         <div className="min-w-0 space-y-4">
-          {items.map((it) =>
-            it.kind === "email" ? (
-              <Message
-                key={it.email.id}
-                email={it.email}
-                attachments={attachments.filter((a) => a.email_id === it.email.id)}
-                senderName={it.email.sent_by ? names.get(it.email.sent_by) : undefined}
-              />
-            ) : (
-              <div key={it.note.id} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:ml-14">
-                <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold tracking-wide text-amber-900 uppercase">Internal note · {names.get(it.note.user_id)}</span>
-                  <span className="tabular text-amber-800">{formatDateTime(it.note.created_at)}</span>
-                </div>
-                <p className="text-sm whitespace-pre-wrap text-amber-950">{it.note.note}</p>
-              </div>
-            ),
-          )}
+          <ThreadView
+            entries={items.map((it) => {
+              if (it.kind === "note") {
+                return {
+                  key: `note-${it.note.id}`,
+                  kind: "note" as const,
+                  node: (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:ml-14">
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold tracking-wide text-amber-900 uppercase">Internal note · {names.get(it.note.user_id)}</span>
+                        <span className="tabular text-amber-800">{formatDateTime(it.note.created_at)}</span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap text-amber-950">{it.note.note}</p>
+                    </div>
+                  ),
+                };
+              }
+              const e = it.email;
+              const sentBy = e.sent_by ? names.get(e.sent_by) : undefined;
+              const outbound = e.direction === "outbound";
+              return {
+                key: `email-${e.id}`,
+                kind: "email" as const,
+                node: <Message email={e} attachments={attachments.filter((a) => a.email_id === e.id)} senderName={sentBy} />,
+                summary: {
+                  name: outbound ? `Motogari${sentBy ? ` (${sentBy.split(/\s+/)[0]})` : ""}` : (e.sender_name ?? e.sender_email ?? "Unknown"),
+                  avatarName: outbound ? (sentBy ?? "Motogari") : (e.sender_name ?? e.sender_email ?? "?"),
+                  snippet: (e.snippet ?? e.body_text ?? "").replace(/\s+/g, " ").trim().slice(0, 240),
+                  date: formatShort(e.received_at),
+                  dateTitle: formatDateTime(e.received_at),
+                  hasAttachments: e.has_attachments,
+                },
+              };
+            })}
+          />
           <Composer
             id={c.id}
             defaultTo={replyTarget}
