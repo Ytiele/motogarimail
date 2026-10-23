@@ -15,3 +15,4 @@ coverage
 
 # One-off combined setup script (generated from supabase/migrations)
 /SUPABASE-SETUP.sql
+/CHAT-ROLE-STEP2.sql
