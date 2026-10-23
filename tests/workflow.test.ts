@@ -93,6 +93,11 @@ describe("canEditConversation", () => {
     expect(canEditConversation(staff, null)).toBe(true);
     expect(canEditConversation(staff, "brian")).toBe(false);
   });
+  it("staff can assign unassigned or their own conversations, not take over a colleague's", () => {
+    expect(canEditConversation(staff, null)).toBe(true);
+    expect(canEditConversation(staff, "jane")).toBe(true);
+    expect(canEditConversation(staff, "peter")).toBe(false);
+  });
   it("admins can act on everything", () => {
     expect(canEditConversation({ id: "ceo", role: "admin" }, "brian")).toBe(true);
   });

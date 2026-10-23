@@ -50,6 +50,20 @@ describe("buildMime with attachments", () => {
   });
 });
 
+describe("Bcc", () => {
+  it("adds a Bcc header for Gmail to deliver (Gmail strips it before anyone receives the mail)", () => {
+    const mime = buildMime({ ...base, bcc: [{ name: "Boss", email: "ceo@motogari.co.ke" }] });
+    expect(mime).toMatch(/^Bcc: "Boss" <ceo@motogari.co.ke>$/m);
+  });
+  it("omits the header when there is no Bcc", () => {
+    expect(buildMime(base)).not.toMatch(/^Bcc:/m);
+  });
+  it("cannot be used to inject headers", () => {
+    const mime = buildMime({ ...base, bcc: [{ name: "x\r\nX-Evil: 1", email: "a@b.com\r\nX-Evil: 2" }] });
+    expect(mime).not.toMatch(/^X-Evil:/m);
+  });
+});
+
 describe("sanitizeOutgoingHtml", () => {
   it("keeps formatting, lists and safe links", () => {
     const out = sanitizeOutgoingHtml('<p><b>Hi</b> <i>there</i> <u>u</u></p><ul><li>one</li></ul><a href="https://motogari.co.ke">site</a>', {});

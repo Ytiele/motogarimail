@@ -39,14 +39,15 @@ export function OwnershipControl({
   id,
   assignedTo,
   meId,
-  isAdmin,
+  canAssign,
   closed,
   staff,
 }: {
   id: string;
   assignedTo: string | null;
   meId: string;
-  isAdmin: boolean;
+  /** Admins always; others while it is unassigned or theirs. */
+  canAssign: boolean;
   closed: boolean;
   staff: { id: string; name: string }[];
 }) {
@@ -58,7 +59,7 @@ export function OwnershipControl({
           {pending ? "Assigning…" : "Assign to me"}
         </button>
       )}
-      {isAdmin && (
+      {canAssign && (
         <div className={cx(!assignedTo && !closed && "mt-2")}>
           <label className="label" htmlFor="assignee">{assignedTo ? "Reassign" : "Assign to staff"}</label>
           <select
@@ -75,10 +76,13 @@ export function OwnershipControl({
           </select>
         </div>
       )}
-      {!isAdmin && assignedTo === meId && (
+      {assignedTo === meId && (
         <button className="btn-ghost mt-1 w-full text-xs" disabled={pending} onClick={() => run(() => assign(id, null))}>
           Release (unassign me)
         </button>
+      )}
+      {!canAssign && assignedTo && (
+        <p className="mt-2 text-xs text-muted">Owned by a colleague. They or an admin can reassign it.</p>
       )}
       <Feedback result={result} />
     </div>

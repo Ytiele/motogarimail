@@ -45,6 +45,8 @@ export type OutgoingMessage = {
   from: Address;
   to: Address[];
   cc: Address[];
+  /** Gmail delivers to these and removes the header before the message reaches anyone. */
+  bcc?: Address[];
   subject: string;
   text: string;
   html: string;

@@ -89,6 +89,7 @@ export function buildMime(msg: OutgoingMessage): string {
     `From: ${encodeAddress(msg.from)}`,
     `To: ${msg.to.map(encodeAddress).join(", ")}`,
     ...(msg.cc.length ? [`Cc: ${msg.cc.map(encodeAddress).join(", ")}`] : []),
+    ...(msg.bcc?.length ? [`Bcc: ${msg.bcc.map(encodeAddress).join(", ")}`] : []),
     `Subject: ${encodeHeaderWord(msg.subject)}`,
     ...(msg.inReplyTo ? [`In-Reply-To: ${headerSafe(msg.inReplyTo)}`] : []),
     ...(msg.references ? [`References: ${headerSafe(msg.references)}`] : []),

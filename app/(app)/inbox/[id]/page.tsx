@@ -190,7 +190,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
         <aside className="grid gap-4 self-start md:grid-cols-2 xl:sticky xl:top-6 xl:grid-cols-1">
           <div className="rounded-2xl bg-canvas p-4">
             <div className="mb-3 text-sm font-medium text-ink">Ownership</div>
-            <OwnershipControl id={c.id} assignedTo={c.assigned_to} meId={me.id} isAdmin={isAdmin} closed={closed} staff={activeStaff} />
+            <OwnershipControl id={c.id} assignedTo={c.assigned_to} meId={me.id} canAssign={canEdit} closed={closed} staff={activeStaff} />
           </div>
           <div className="rounded-2xl bg-canvas p-4">
             <div className="mb-3 text-sm font-medium text-ink">Workflow</div>
@@ -261,6 +261,7 @@ function Message({
           <div className="truncate text-xs text-muted">
             to {outbound ? email.recipient_email : "Motogari"}
             {cc.length > 0 && `, cc ${cc.map((a) => a.email).join(", ")}`}
+            {outbound && email.bcc && `, bcc ${parseAddressList(email.bcc).map((a) => a.email).join(", ")}`}
           </div>
         </div>
       </header>

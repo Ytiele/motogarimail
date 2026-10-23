@@ -72,6 +72,7 @@ export function Composer({
   const [atts, setAtts] = useState<Att[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [active, setActive] = useState<Record<string, boolean>>({});
+  const [showCopies, setShowCopies] = useState(!!defaultCc);
   const editor = useRef<HTMLDivElement>(null);
   const range = useRef<Range | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -259,14 +260,26 @@ export function Composer({
             <input type="hidden" name="id" value={id} />
             <input type="hidden" name="html" value={html} />
             <input type="hidden" name="attachments" value={JSON.stringify(ready)} />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
+            <div>
+              <div className="flex items-end justify-between">
                 <label className="label" htmlFor="to">To</label>
-                <input className="input" id="to" name="to" defaultValue={defaultTo} required />
+                {!showCopies && (
+                  <button type="button" onClick={() => setShowCopies(true)} className="mb-1 text-xs font-medium text-brand-600 hover:underline">
+                    Cc Bcc
+                  </button>
+                )}
               </div>
+              <input className="input" id="to" name="to" defaultValue={defaultTo} required />
+            </div>
+            {/* Like Gmail: Cc/Bcc stay tucked away until needed. Bcc recipients are hidden from everyone else. */}
+            <div className={cx("grid gap-3 sm:grid-cols-2", !showCopies && "hidden")}>
               <div>
                 <label className="label" htmlFor="cc">Cc</label>
                 <input className="input" id="cc" name="cc" defaultValue={defaultCc} placeholder="Optional" />
+              </div>
+              <div>
+                <label className="label" htmlFor="bcc">Bcc</label>
+                <input className="input" id="bcc" name="bcc" placeholder="Hidden from other recipients" />
               </div>
             </div>
 

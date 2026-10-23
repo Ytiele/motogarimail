@@ -135,10 +135,10 @@ export async function assign(id: string, assigneeId: string | null): Promise<Act
     }
 
     const r = await mutateConversation(id, (c) => {
-      const isOwner = c.assigned_to === me.id;
-      // Staff may only release their own assignment; assigning others is an admin action.
-      if (me.role !== "admin" && !(isOwner && assigneeId === null)) {
-        return { error: "Only an admin can assign conversations to other people. Use “Assign to me” instead." };
+      // Anyone can assign an unassigned conversation, or one they own, to themselves or a colleague.
+      // Taking over a conversation someone else owns stays an admin action.
+      if (!canEditConversation(me, c.assigned_to)) {
+        return { error: "This conversation belongs to someone else. Ask them or an admin to reassign it." };
       }
       if (c.assigned_to === assigneeId) return null;
       const next = statusOnAssign(c.status, assigneeId);
@@ -381,6 +381,7 @@ const replySchema = z.object({
   id: uuid,
   to: z.string().trim().min(3, "Add at least one recipient.").max(2000),
   cc: z.string().trim().max(2000).optional().default(""),
+  bcc: z.string().trim().max(2000).optional().default(""),
   html: z.string().max(500_000),
   attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS, `Attach at most ${MAX_ATTACHMENTS} files.`),
   after: z.enum(["", "waiting", "resolved"]).optional().default(""),
@@ -423,6 +424,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       id: form.get("id"),
       to: form.get("to"),
       cc: form.get("cc") ?? "",
+      bcc: form.get("bcc") ?? "",
       html: form.get("html") ?? "",
       attachments: attachmentsRaw,
       after: form.get("after") ?? "",
@@ -443,8 +445,10 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
     if (!body && !used.length) return { error: "Write a reply first." };
     const to = validAddresses(parsed.data.to);
     const cc = validAddresses(parsed.data.cc);
+    const bcc = validAddresses(parsed.data.bcc);
     if (!to?.length) return { error: "Check the recipient address." };
     if (cc === null) return { error: "Check the CC addresses." };
+    if (bcc === null) return { error: "Check the BCC addresses." };
     if (!(await allow(`reply:${me.id}`, 20, 60))) return { error: "You are sending too quickly. Wait a moment and try again." };
 
     const db = adminDb();
@@ -492,6 +496,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       from: { name: "Motogari", email: conn.email_address },
       to,
       cc: cc ?? [],
+      bcc: bcc ?? [],
       subject: replySubject(c.subject),
       text,
       html,
@@ -524,7 +529,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
         replyTo: null,
         to: parsed.data.to,
         cc: parsed.data.cc || null,
-        bcc: null,
+        bcc: parsed.data.bcc || null,
         subject: outgoing.subject,
         text,
         html,
@@ -554,7 +559,7 @@ export async function sendReply(_: FormResult, form: FormData): Promise<FormResu
       conversationId: id,
       emailId: ingested.emailId,
       userId: me.id,
-      metadata: { to: to.map((a) => a.email), cc: (cc ?? []).map((a) => a.email), gmail_message_id: sent.id },
+      metadata: { to: to.map((a) => a.email), cc: (cc ?? []).map((a) => a.email), bcc: (bcc ?? []).map((a) => a.email), gmail_message_id: sent.id },
     });
     if (r.ok && r.changed) {
       if (!r.before.assigned_to && r.after.assigned_to === me.id) {
